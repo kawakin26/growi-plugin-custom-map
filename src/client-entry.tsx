@@ -1,4 +1,3 @@
-import React, { useState } from 'react';
 import { visit } from 'unist-util-visit';
 import remarkDirective from 'remark-directive';
 
@@ -11,7 +10,6 @@ const getAttachmentUrlByName = (fileName: string): string => {
   try {
     const attachments = (window as any).GROWI_CONTEXT?.page?.attachments || [];
     const found = attachments.find((att: any) => att.originalName === fileName || att.fileName === fileName);
-
     if (found) {
       return `/attachment/${found._id}`;
     }
@@ -22,86 +20,135 @@ const getAttachmentUrlByName = (fileName: string): string => {
 };
 
 // ==========================================
-// 2. ポップアップモーダルのReactコンポーネント
+// 2. 描画されたHTML要素をボタン・モーダルに変換するメインロジック
 // ==========================================
-interface MapPopupProps {
-  file: string;
-  x: string;
-  y: string;
-  text?: string;
-  color?: string;
-  zoom?: string;
-  cropScale?: string;
-  children: React.ReactNode;
-}
+const initMapPopups = (): void => {
+  // まだ処理されていないカスタムマップ要素をすべて取得
+  const elements = document.querySelectorAll('div[data-plugin="custom-map"]:not([data-processed="true"])');
 
-const MapPopupButton: React.FC<MapPopupProps> = ({
-  file, x, y, text = '', color = '#ff3b30', zoom = 'false', cropScale = '2', children
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
+  elements.forEach((el: Element) => {
+    const htmlEl = el as HTMLElement;
+    htmlEl.setAttribute('data-processed', 'true'); // 二重処理防止
 
-  const imageUrl = getAttachmentUrlByName(file);
-  const isZoomed = zoom === 'true';
+    // データ属性（パラメータ）を取得
+    const file = htmlEl.getAttribute('data-file') || '';
+    const x = htmlEl.getAttribute('data-x') || '50';
+    const y = htmlEl.getAttribute('data-y') || '50';
+    const text = htmlEl.getAttribute('data-text') || '';
+    const color = htmlEl.getAttribute('data-color') || '#ff3b30';
+    const zoom = htmlEl.getAttribute('data-zoom') === 'true';
+    const cropScale = htmlEl.getAttribute('data-crop-scale') || '2';
 
-  const modalStyle: React.CSSProperties = {
-    position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-    backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center',
-    zIndex: 2500
-  };
+    // 中身のテキスト（「ここをクリックしてマップを起動」など）を取得
+    const buttonText = htmlEl.innerText.trim() || 'マップを開く';
+    htmlEl.innerText = ''; // 一旦クリア
 
-  const imgStyle: React.CSSProperties = isZoomed ? {
-    transform: `scale(${cropScale})`,
-    transformOrigin: `${x}% ${y}%`,
-    display: 'block', transition: 'transform 0.2s ease'
-  } : {
-    width: '100%', height: 'auto', display: 'block'
-  };
+    // ─── A. ボタンの生成 ───
+    const button = document.createElement('button');
+    button.className = 'btn btn-outline-primary m-1';
+    button.innerText = buttonText;
+    htmlEl.appendChild(button);
 
-  return (
-    <>
-      <button className="btn btn-outline-primary m-1" onClick={() => setIsOpen(true)}>
-        {children || 'マップを開く'}
-      </button>
+    // 画像URLを取得
+    const imageUrl = getAttachmentUrlByName(file);
 
-      {isOpen && (
-        <div style={modalStyle} onClick={() => setIsOpen(false)}>
-          <div
-            style={{ position: 'relative', backgroundColor: '#fff', padding: '20px', borderRadius: '8px', maxWidth: '90vw', maxHeight: '90vh' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={() => setIsOpen(false)}
-              style={{ position: 'absolute', top: '-15px', right: '-15px', background: '#000', color: '#fff', border: 'none', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer' }}
-            >
-              &times;
-            </button>
+    // ─── B. クリックイベントの登録（モーダルの動的生成） ───
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
 
-            <div style={{ position: 'relative', overflow: 'hidden', maxWidth: '100%', maxHeight: '75vh' }}>
-              <img src={imageUrl} alt={file} style={imgStyle} />
+      // 既存のモーダルがあれば削除
+      const oldModal = document.getElementById('growi-custom-map-modal');
+      if (oldModal) oldModal.remove();
 
-              <div style={{
-                position: 'absolute', left: `${x}%`, top: `${y}%`,
-                width: '16px', height: '16px', backgroundColor: color,
-                border: '2px solid #fff', borderRadius: '50%', transform: 'translate(-50%, -50%)',
-                boxShadow: '0 2px 5px rgba(0,0,0,0.4)'
-              }}>
-                {text && (
-                  <div style={{
-                    position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-                    backgroundColor: color, color: '#fff', padding: '4px 8px', borderRadius: '4px',
-                    fontSize: '12px', whiteSpace: 'nowrap', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                  }}>
-                    {text}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
+      // モーダル外枠
+      const modal = document.createElement('div');
+      modal.id = 'growi-custom-map-modal';
+      Object.assign(modal.style, {
+        position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
+        backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center',
+        zIndex: '9999'
+      });
+
+      // モーダルコンテンツカード
+      const content = document.createElement('div');
+      Object.assign(content.style, {
+        position: 'relative', backgroundColor: '#fff', padding: '20px', borderRadius: '8px',
+        maxWidth: '90vw', maxHeight: '90vh', boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+      });
+      content.addEventListener('click', (ae) => ae.stopPropagation()); // 内側クリックで閉じないように
+
+      // 閉じるボタン
+      const closeBtn = document.createElement('button');
+      closeBtn.innerHTML = '&times;';
+      Object.assign(closeBtn.style, {
+        position: 'absolute', top: '-15px', right: '-15px', background: '#000', color: '#fff',
+        border: 'none', borderRadius: '50%', width: '30px', height: '30px', fontSize: '20px',
+        cursor: 'pointer', zIndex: '10', display: 'flex', justifyContent: 'center', alignItems: 'center'
+      });
+      closeBtn.addEventListener('click', () => modal.remove());
+
+      // 画像コンテナ（はみ出し防止用）
+      const imgContainer = document.createElement('div');
+      Object.assign(imgContainer.style, {
+        position: 'relative', overflow: 'hidden', maxWidth: '100%', maxHeight: '75vh'
+      });
+
+      // マップ画像本体
+      const img = document.createElement('img');
+      img.src = imageUrl;
+      img.alt = file;
+      if (zoom) {
+        Object.assign(img.style, {
+          transform: `scale(${cropScale})`,
+          transformOrigin: `${x}% ${y}%`,
+          display: 'block', transition: 'transform 0.2s ease'
+        });
+      } else {
+        Object.assign(img.style, {
+          width: '100%', height: 'auto', display: 'block'
+        });
+      }
+
+      // ピン要素
+      const pin = document.createElement('div');
+      Object.assign(pin.style, {
+        position: 'absolute', left: `${x}%`, top: `${y}%`,
+        width: '16px', height: '16px', backgroundColor: color,
+        border: '2px solid #fff', borderRadius: '50%', transform: 'translate(-50%, -50%)',
+        boxShadow: '0 2px 5px rgba(0,0,0,0.4)'
+      });
+
+      // ピンに付属するテキスト
+      if (text) {
+        const pinText = document.createElement('div');
+        pinText.innerText = text;
+        Object.assign(pinText.style, {
+          position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: color, color: '#fff', padding: '4px 8px', borderRadius: '4px',
+          fontSize: '12px', whiteSpace: 'nowrap', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+        });
+        pin.appendChild(pinText);
+      }
+
+      // 要素を組み立てて画面へ追加
+      imgContainer.appendChild(img);
+      imgContainer.appendChild(pin);
+      content.appendChild(closeBtn);
+      content.appendChild(imgContainer);
+      modal.appendChild(content);
+
+      // 背景クリックで閉じる
+      modal.addEventListener('click', () => modal.remove());
+
+      document.body.appendChild(modal);
+    });
+  });
 };
+
+// 画面の更新（ページ遷移やレンダリング）を監視して定期実行
+if (typeof window !== 'undefined') {
+  setInterval(initMapPopups, 1000);
+}
 
 // ==========================================
 // 3. GROWIへのプラグイン登録とremarkの定義
@@ -131,11 +178,11 @@ export const activate = (): void => {
         visit(tree, (node) => {
           if (node.type === 'containerDirective' && node.name === 'custom-map') {
             const attributes = node.attributes || {};
-            node.type = 'customMapNode';
 
-            // 💡 GROWIのコンポーネントマッパーが認識できるようにデータを整形
+            // Reactコンポーネントを通さず、安全な標準div要素としてHTMLに出力
+            node.type = 'htmlBlock';
             node.data = {
-              hName: 'custom-map-button', // 小文字ハイフン繋ぎの独自タグ名にする
+              hName: 'div',
               hProperties: {
                 'data-plugin': 'custom-map',
                 ...attributes
@@ -146,55 +193,28 @@ export const activate = (): void => {
       };
     });
 
-    // 3. Rehype / Reactコンポーネントの登録
-    // GROWIが描画時に参照する全てのコンポーネント保持プロパティに対して、網羅的に登録します
-    const renderComponent = (props: any) => {
-      const { file, x, y, text, color, zoom, cropScale, children } = props;
-      return (
-        <MapPopupButton
-          file={file} x={x} y={y} text={text}
-          color={color} zoom={zoom} cropScale={cropScale}
-        >
-          {children}
-        </MapPopupButton>
-      );
-    };
-
-    // GROWIの複数のレンダラー仕様（バージョンごとの差異）に対応するため、すべてにマッピング
-    options.components = options.components || {};
-    options.components['custom-map-button'] = renderComponent;
-    options.components.customMapNode = renderComponent;
-
-    options.componentMap = options.componentMap || {};
-    options.componentMap['custom-map-button'] = renderComponent;
-    options.componentMap.customMapNode = renderComponent;
-
     return options;
   };
 };
 
-
 export const deactivate = (): void => {
-  // 必要に応じてクリーンアップ処理を記述
+  // クリーンアップ処理
 };
 
 // ==========================================
-// 4. プラグインアクティベーターの定義（両方の仕様に対応）
+// 4. プラグインアクティベーターの定義
 // ==========================================
 const pluginDefinition = {
   activate,
   deactivate,
-  activatePlugin: activate,     // GROWIの別形式用のエイリアス
-  deactivatePlugin: deactivate, // GROWIの別形式用のエイリアス
+  activatePlugin: activate,
+  deactivatePlugin: deactivate,
 };
 
 if (typeof window !== 'undefined') {
   const windowAsAny = window as any;
   windowAsAny.pluginActivators = windowAsAny.pluginActivators || {};
-
-  // ⚠️ package.json の name フィールドと完全に一致させて登録
   windowAsAny.pluginActivators['growi-plugin-custom-map'] = pluginDefinition;
 }
 
-// 標準的なモジュールエクスポートもサポート
 export default pluginDefinition;
