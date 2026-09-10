@@ -132,8 +132,10 @@ export const activate = (): void => {
           if (node.type === 'containerDirective' && node.name === 'custom-map') {
             const attributes = node.attributes || {};
             node.type = 'customMapNode';
+
+            // 💡 GROWIのコンポーネントマッパーが認識できるようにデータを整形
             node.data = {
-              hName: 'customMapNode', // rehypeコンポーネントマッピングのキーと合わせる
+              hName: 'custom-map-button', // 小文字ハイフン繋ぎの独自タグ名にする
               hProperties: {
                 'data-plugin': 'custom-map',
                 ...attributes
@@ -144,9 +146,9 @@ export const activate = (): void => {
       };
     });
 
-    // 3. RehypeのReactコンポーネントマッピングに登録（components と componentMap の両方に保険として追加）
-    options.components = options.components || {};
-    options.components.customMapNode = (props: any) => {
+    // 3. Rehype / Reactコンポーネントの登録
+    // GROWIが描画時に参照する全てのコンポーネント保持プロパティに対して、網羅的に登録します
+    const renderComponent = (props: any) => {
       const { file, x, y, text, color, zoom, cropScale, children } = props;
       return (
         <MapPopupButton
@@ -158,12 +160,19 @@ export const activate = (): void => {
       );
     };
 
+    // GROWIの複数のレンダラー仕様（バージョンごとの差異）に対応するため、すべてにマッピング
+    options.components = options.components || {};
+    options.components['custom-map-button'] = renderComponent;
+    options.components.customMapNode = renderComponent;
+
     options.componentMap = options.componentMap || {};
-    options.componentMap.customMapNode = options.components.customMapNode;
+    options.componentMap['custom-map-button'] = renderComponent;
+    options.componentMap.customMapNode = renderComponent;
 
     return options;
   };
 };
+
 
 export const deactivate = (): void => {
   // 必要に応じてクリーンアップ処理を記述
