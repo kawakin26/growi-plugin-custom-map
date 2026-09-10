@@ -179,8 +179,7 @@ export const activate = (): void => {
           if (node.type === 'containerDirective' && node.name === 'custom-map') {
             const attributes = node.attributes || {};
 
-            // Reactコンポーネントを通さず、安全な標準div要素としてHTMLに出力
-            node.type = 'htmlBlock';
+            // ⚠️ 【修正箇所】node.typeの書き換えを廃止し、正規の方法でdiv要素とカスタム属性をマッピング
             node.data = {
               hName: 'div',
               hProperties: {
