@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.init = void 0;
+exports.deactivate = exports.activate = void 0;
 const jsx_runtime_1 = require("react/jsx-runtime");
 const react_1 = require("react");
 const unist_util_visit_1 = require("unist-util-visit");
@@ -57,22 +57,20 @@ const MapPopupButton = ({ file, x, y, text = '', color = '#ff3b30', zoom = 'fals
 // ==========================================
 // 3. GROWIへのプラグイン登録とremarkの定義
 // ==========================================
-const init = (context) => {
-    // GROWIのMarkdownレンダラーのオプションオブジェクトを取得
+// GROWIがプラグインを起動するときに呼び出す activate 関数
+const activate = (context) => {
     const { options } = context;
-    // 1. remark-directive（::: 記法を解析する公式プラグイン）を有効化
+    // remark-directive を有効化
     options.remarkPlugins.push(remark_directive_1.default);
-    // 2. 自作のカスタムマップ解析ロジックを注入
+    // 自作のカスタムマップ解析ロジックを注入
     options.remarkPlugins.push(() => {
         return (tree) => {
             (0, unist_util_visit_1.visit)(tree, (node) => {
-                // :::custom-map 記法を検出
                 if (node.type === 'containerDirective' && node.name === 'custom-map') {
                     const attributes = node.attributes || {};
-                    // ノードのタイプを独自のものに書き換え、属性を格納
                     node.type = 'customMapNode';
                     node.data = {
-                        hName: 'div', // フォールバック用のタグ
+                        hName: 'div',
                         hProperties: {
                             'data-plugin': 'custom-map',
                             ...attributes
@@ -82,8 +80,7 @@ const init = (context) => {
             });
         };
     });
-    // 3. rehype / Reactコンポーネントとしての描画マッピングを登録
-    // GROWIのカスタム要素レンダラー（CustomComponentMapなど）にコンポーネントを紐付けます
+    // rehype / Reactコンポーネントとしての描画マッピングを登録
     if (options.componentMap) {
         options.componentMap.customMapNode = (props) => {
             const { file, x, y, text, color, zoom, cropScale, children } = props;
@@ -91,4 +88,18 @@ const init = (context) => {
         };
     }
 };
-exports.init = init;
+exports.activate = activate;
+// プラグインが無効化されたときのクリーンアップ（空で構いません）
+const deactivate = () => {
+    // 必要に応じてクリーンアップ処理を記述
+};
+exports.deactivate = deactivate;
+// ⚠️ 【重要】GROWI本体にこのプラグインのアクティベーターを登録する
+if (typeof window !== 'undefined') {
+    const windowAsAny = window;
+    windowAsAny.pluginActivators = windowAsAny.pluginActivators || {};
+    windowAsAny.pluginActivators['growi-plugin-custom-map'] = {
+        activate: exports.activate,
+        deactivate: exports.deactivate,
+    };
+}

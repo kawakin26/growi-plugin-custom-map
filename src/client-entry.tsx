@@ -112,25 +112,22 @@ const MapPopupButton: React.FC<MapPopupProps> = ({
 // ==========================================
 // 3. GROWIへのプラグイン登録とremarkの定義
 // ==========================================
-export const init = (context: any) => {
-  // GROWIのMarkdownレンダラーのオプションオブジェクトを取得
+// GROWIがプラグインを起動するときに呼び出す activate 関数
+export const activate = (context: any) => {
   const { options } = context;
 
-  // 1. remark-directive（::: 記法を解析する公式プラグイン）を有効化
+  // remark-directive を有効化
   options.remarkPlugins.push(remarkDirective);
 
-  // 2. 自作のカスタムマップ解析ロジックを注入
+  // 自作のカスタムマップ解析ロジックを注入
   options.remarkPlugins.push(() => {
     return (tree: any) => {
       visit(tree, (node) => {
-        // :::custom-map 記法を検出
         if (node.type === 'containerDirective' && node.name === 'custom-map') {
           const attributes = node.attributes || {};
-
-          // ノードのタイプを独自のものに書き換え、属性を格納
           node.type = 'customMapNode';
           node.data = {
-            hName: 'div', // フォールバック用のタグ
+            hName: 'div',
             hProperties: {
               'data-plugin': 'custom-map',
               ...attributes
@@ -141,8 +138,7 @@ export const init = (context: any) => {
     };
   });
 
-  // 3. rehype / Reactコンポーネントとしての描画マッピングを登録
-  // GROWIのカスタム要素レンダラー（CustomComponentMapなど）にコンポーネントを紐付けます
+  // rehype / Reactコンポーネントとしての描画マッピングを登録
   if (options.componentMap) {
     options.componentMap.customMapNode = (props: any) => {
       const { file, x, y, text, color, zoom, cropScale, children } = props;
@@ -157,3 +153,18 @@ export const init = (context: any) => {
     };
   }
 };
+
+// プラグインが無効化されたときのクリーンアップ（空で構いません）
+export const deactivate = () => {
+  // 必要に応じてクリーンアップ処理を記述
+};
+
+// ⚠️ 【重要】GROWI本体にこのプラグインのアクティベーターを登録する
+if (typeof window !== 'undefined') {
+  const windowAsAny = window as any;
+  windowAsAny.pluginActivators = windowAsAny.pluginActivators || {};
+  windowAsAny.pluginActivators['growi-plugin-custom-map'] = {
+    activate,
+    deactivate,
+  };
+}
