@@ -3,13 +3,12 @@ import { visit } from 'unist-util-visit';
 import remarkDirective from 'remark-directive';
 
 declare const growiFacade: any;
+
 // ==========================================
 // 1. ページ内の添付ファイル名からURLを探す関数
 // ==========================================
 const getAttachmentUrlByName = (fileName: string): string => {
   try {
-    // GROWIがグローバルに保持しているページ情報や添付ファイルリストを参照します
-    // ※環境やGROWIの内部仕様により変数名が異なる場合があります
     const attachments = (window as any).GROWI_CONTEXT?.page?.attachments || [];
     const found = attachments.find((att: any) => att.originalName === fileName || att.fileName === fileName);
 
@@ -19,7 +18,6 @@ const getAttachmentUrlByName = (fileName: string): string => {
   } catch (e) {
     console.error("Failed to fetch attachment list from GROWI context", e);
   }
-  // 見つからない場合はフォールバックとしてプレースホルダーやそのままの文字列を返す
   return `/images/maps/${fileName}`;
 };
 
@@ -61,19 +59,16 @@ const MapPopupButton: React.FC<MapPopupProps> = ({
 
   return (
     <>
-      {/* 画面上の起動ボタン（GROWIの標準ボタンクラススタイルを適用） */}
       <button className="btn btn-outline-primary m-1" onClick={() => setIsOpen(true)}>
         {children || 'マップを開く'}
       </button>
 
-      {/* ポップアップモーダル本体 */}
       {isOpen && (
         <div style={modalStyle} onClick={() => setIsOpen(false)}>
           <div
             style={{ position: 'relative', backgroundColor: '#fff', padding: '20px', borderRadius: '8px', maxWidth: '90vw', maxHeight: '90vh' }}
-            onClick={(e) => e.stopPropagation()} // モーダル内クリックで閉じないように
+            onClick={(e) => e.stopPropagation()}
           >
-            {/* 閉じるボタン */}
             <button
               onClick={() => setIsOpen(false)}
               style={{ position: 'absolute', top: '-15px', right: '-15px', background: '#000', color: '#fff', border: 'none', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer' }}
@@ -81,11 +76,9 @@ const MapPopupButton: React.FC<MapPopupProps> = ({
               &times;
             </button>
 
-            {/* 画像コンテナ */}
             <div style={{ position: 'relative', overflow: 'hidden', maxWidth: '100%', maxHeight: '75vh' }}>
               <img src={imageUrl} alt={file} style={imgStyle} />
 
-              {/* ピンの配置 */}
               <div style={{
                 position: 'absolute', left: `${x}%`, top: `${y}%`,
                 width: '16px', height: '16px', backgroundColor: color,
@@ -113,11 +106,8 @@ const MapPopupButton: React.FC<MapPopupProps> = ({
 // ==========================================
 // 3. GROWIへのプラグイン登録とremarkの定義
 // ==========================================
-// GROWIがプラグインを起動するときに呼び出す activate 関数
-// GROWI本体が利用可能か確認
-
-const activate = (): void => {
-  if (growiFacade == null || growiFacade.markdownRenderer == null) {
+export const activate = (): void => {
+  if (typeof growiFacade === 'undefined' || growiFacade == null || growiFacade.markdownRenderer == null) {
     return;
   }
 
@@ -129,11 +119,13 @@ const activate = (): void => {
       ? original(...args)
       : optionsGenerators.generateViewOptions(...args);
 
-    // 描画に使うReactコンポーネントを差し替える
-    // remark-directive を有効化
-    options.remarkPlugins.push(remarkDirective);
+    // 1. remark-directive プラグインを登録
+    options.remarkPlugins = options.remarkPlugins || [];
+    if (!options.remarkPlugins.includes(remarkDirective)) {
+      options.remarkPlugins.push(remarkDirective);
+    }
 
-    // 自作のカスタムマップ解析ロジックを注入
+    // 2. 自作のカスタムマップノード変換ロジックを注入
     options.remarkPlugins.push(() => {
       return (tree: any) => {
         visit(tree, (node) => {
@@ -141,7 +133,7 @@ const activate = (): void => {
             const attributes = node.attributes || {};
             node.type = 'customMapNode';
             node.data = {
-              hName: 'div',
+              hName: 'customMapNode', // rehypeコンポーネントマッピングのキーと合わせる
               hProperties: {
                 'data-plugin': 'custom-map',
                 ...attributes
@@ -152,36 +144,48 @@ const activate = (): void => {
       };
     });
 
-    // rehype / Reactコンポーネントとしての描画マッピングを登録
-    if (options.componentMap) {
-      options.componentMap.customMapNode = (props: any) => {
-        const { file, x, y, text, color, zoom, cropScale, children } = props;
-        return (
-          <MapPopupButton
-            file={file} x={x} y={y} text={text}
-            color={color} zoom={zoom} cropScale={cropScale}
-          >
-            {children}
-          </MapPopupButton>
-        );
-      };
-    }
+    // 3. RehypeのReactコンポーネントマッピングに登録（components と componentMap の両方に保険として追加）
+    options.components = options.components || {};
+    options.components.customMapNode = (props: any) => {
+      const { file, x, y, text, color, zoom, cropScale, children } = props;
+      return (
+        <MapPopupButton
+          file={file} x={x} y={y} text={text}
+          color={color} zoom={zoom} cropScale={cropScale}
+        >
+          {children}
+        </MapPopupButton>
+      );
+    };
+
+    options.componentMap = options.componentMap || {};
+    options.componentMap.customMapNode = options.components.customMapNode;
+
     return options;
   };
 };
 
-// プラグインが無効化されたときのクリーンアップ（空で構いません）
-const deactivate = (): void => {
-  // クリーンアップ処理（必要に応じて実装）
-  //
+export const deactivate = (): void => {
+  // 必要に応じてクリーンアップ処理を記述
 };
 
-
-// `window.pluginActivators` オブジェクトへの登録
-if ((window as any).pluginActivators == null) {
-  (window as any).pluginActivators = {};
-}
-(window as any).pluginActivators['growi-plugin-my-feature'] = {
+// ==========================================
+// 4. プラグインアクティベーターの定義（両方の仕様に対応）
+// ==========================================
+const pluginDefinition = {
   activate,
   deactivate,
+  activatePlugin: activate,     // GROWIの別形式用のエイリアス
+  deactivatePlugin: deactivate, // GROWIの別形式用のエイリアス
 };
+
+if (typeof window !== 'undefined') {
+  const windowAsAny = window as any;
+  windowAsAny.pluginActivators = windowAsAny.pluginActivators || {};
+
+  // ⚠️ package.json の name フィールドと完全に一致させて登録
+  windowAsAny.pluginActivators['growi-plugin-custom-map'] = pluginDefinition;
+}
+
+// 標準的なモジュールエクスポートもサポート
+export default pluginDefinition;

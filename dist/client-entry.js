@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.deactivate = exports.activate = void 0;
 const jsx_runtime_1 = require("react/jsx-runtime");
 const react_1 = require("react");
 const unist_util_visit_1 = require("unist-util-visit");
@@ -12,8 +13,6 @@ const remark_directive_1 = __importDefault(require("remark-directive"));
 // ==========================================
 const getAttachmentUrlByName = (fileName) => {
     try {
-        // GROWIがグローバルに保持しているページ情報や添付ファイルリストを参照します
-        // ※環境やGROWIの内部仕様により変数名が異なる場合があります
         const attachments = window.GROWI_CONTEXT?.page?.attachments || [];
         const found = attachments.find((att) => att.originalName === fileName || att.fileName === fileName);
         if (found) {
@@ -23,7 +22,6 @@ const getAttachmentUrlByName = (fileName) => {
     catch (e) {
         console.error("Failed to fetch attachment list from GROWI context", e);
     }
-    // 見つからない場合はフォールバックとしてプレースホルダーやそのままの文字列を返す
     return `/images/maps/${fileName}`;
 };
 const MapPopupButton = ({ file, x, y, text = '', color = '#ff3b30', zoom = 'false', cropScale = '2', children }) => {
@@ -56,10 +54,8 @@ const MapPopupButton = ({ file, x, y, text = '', color = '#ff3b30', zoom = 'fals
 // ==========================================
 // 3. GROWIへのプラグイン登録とremarkの定義
 // ==========================================
-// GROWIがプラグインを起動するときに呼び出す activate 関数
-// GROWI本体が利用可能か確認
 const activate = () => {
-    if (growiFacade == null || growiFacade.markdownRenderer == null) {
+    if (typeof growiFacade === 'undefined' || growiFacade == null || growiFacade.markdownRenderer == null) {
         return;
     }
     const { optionsGenerators } = growiFacade.markdownRenderer;
@@ -68,10 +64,12 @@ const activate = () => {
         const options = original
             ? original(...args)
             : optionsGenerators.generateViewOptions(...args);
-        // 描画に使うReactコンポーネントを差し替える
-        // remark-directive を有効化
-        options.remarkPlugins.push(remark_directive_1.default);
-        // 自作のカスタムマップ解析ロジックを注入
+        // 1. remark-directive プラグインを登録
+        options.remarkPlugins = options.remarkPlugins || [];
+        if (!options.remarkPlugins.includes(remark_directive_1.default)) {
+            options.remarkPlugins.push(remark_directive_1.default);
+        }
+        // 2. 自作のカスタムマップノード変換ロジックを注入
         options.remarkPlugins.push(() => {
             return (tree) => {
                 (0, unist_util_visit_1.visit)(tree, (node) => {
@@ -79,7 +77,7 @@ const activate = () => {
                         const attributes = node.attributes || {};
                         node.type = 'customMapNode';
                         node.data = {
-                            hName: 'div',
+                            hName: 'customMapNode', // rehypeコンポーネントマッピングのキーと合わせる
                             hProperties: {
                                 'data-plugin': 'custom-map',
                                 ...attributes
@@ -89,26 +87,36 @@ const activate = () => {
                 });
             };
         });
-        // rehype / Reactコンポーネントとしての描画マッピングを登録
-        if (options.componentMap) {
-            options.componentMap.customMapNode = (props) => {
-                const { file, x, y, text, color, zoom, cropScale, children } = props;
-                return ((0, jsx_runtime_1.jsx)(MapPopupButton, { file: file, x: x, y: y, text: text, color: color, zoom: zoom, cropScale: cropScale, children: children }));
-            };
-        }
+        // 3. RehypeのReactコンポーネントマッピングに登録（components と componentMap の両方に保険として追加）
+        options.components = options.components || {};
+        options.components.customMapNode = (props) => {
+            const { file, x, y, text, color, zoom, cropScale, children } = props;
+            return ((0, jsx_runtime_1.jsx)(MapPopupButton, { file: file, x: x, y: y, text: text, color: color, zoom: zoom, cropScale: cropScale, children: children }));
+        };
+        options.componentMap = options.componentMap || {};
+        options.componentMap.customMapNode = options.components.customMapNode;
         return options;
     };
 };
-// プラグインが無効化されたときのクリーンアップ（空で構いません）
+exports.activate = activate;
 const deactivate = () => {
-    // クリーンアップ処理（必要に応じて実装）
-    //
+    // 必要に応じてクリーンアップ処理を記述
 };
-// `window.pluginActivators` オブジェクトへの登録
-if (window.pluginActivators == null) {
-    window.pluginActivators = {};
+exports.deactivate = deactivate;
+// ==========================================
+// 4. プラグインアクティベーターの定義（両方の仕様に対応）
+// ==========================================
+const pluginDefinition = {
+    activate: exports.activate,
+    deactivate: exports.deactivate,
+    activatePlugin: exports.activate, // GROWIの別形式用のエイリアス
+    deactivatePlugin: exports.deactivate, // GROWIの別形式用のエイリアス
+};
+if (typeof window !== 'undefined') {
+    const windowAsAny = window;
+    windowAsAny.pluginActivators = windowAsAny.pluginActivators || {};
+    // ⚠️ package.json の name フィールドと完全に一致させて登録
+    windowAsAny.pluginActivators['growi-plugin-custom-map'] = pluginDefinition;
 }
-window.pluginActivators['growi-plugin-my-feature'] = {
-    activate,
-    deactivate,
-};
+// 標準的なモジュールエクスポートもサポート
+exports.default = pluginDefinition;
