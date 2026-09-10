@@ -2,9 +2,20 @@
   "name": "growi-plugin-custom-map",
   "version": "1.0.0",
   "description": "GROWI custom map popup plugin using original image file name",
-  "main": "dist/index.js",
+  "license": "MIT",
+  "keywords": [
+    "growi",
+    "growi-plugin"
+  ],
+  "main": "dist/client-entry.js",
   "scripts": {
     "build": "npx tsc"
+  },
+  "growiPlugin": {
+    "schemaVersion": "4",
+    "types": [
+      "script"
+    ]
   },
   "dependencies": {
     "remark-directive": "^2.0.0",
