@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { visit } from 'unist-util-visit';
 import remarkDirective from 'remark-directive';
 
+declare const growiFacade: any;
 // ==========================================
 // 1. ページ内の添付ファイル名からURLを探す関数
 // ==========================================
@@ -113,58 +114,74 @@ const MapPopupButton: React.FC<MapPopupProps> = ({
 // 3. GROWIへのプラグイン登録とremarkの定義
 // ==========================================
 // GROWIがプラグインを起動するときに呼び出す activate 関数
-export const activate = (context: any) => {
-  const { options } = context;
+// GROWI本体が利用可能か確認
 
-  // remark-directive を有効化
-  options.remarkPlugins.push(remarkDirective);
-
-  // 自作のカスタムマップ解析ロジックを注入
-  options.remarkPlugins.push(() => {
-    return (tree: any) => {
-      visit(tree, (node) => {
-        if (node.type === 'containerDirective' && node.name === 'custom-map') {
-          const attributes = node.attributes || {};
-          node.type = 'customMapNode';
-          node.data = {
-            hName: 'div',
-            hProperties: {
-              'data-plugin': 'custom-map',
-              ...attributes
-            }
-          };
-        }
-      });
-    };
-  });
-
-  // rehype / Reactコンポーネントとしての描画マッピングを登録
-  if (options.componentMap) {
-    options.componentMap.customMapNode = (props: any) => {
-      const { file, x, y, text, color, zoom, cropScale, children } = props;
-      return (
-        <MapPopupButton
-          file={file} x={x} y={y} text={text}
-          color={color} zoom={zoom} cropScale={cropScale}
-        >
-          {children}
-        </MapPopupButton>
-      );
-    };
+const activate = (): void => {
+  if (growiFacade == null || growiFacade.markdownRenderer == null) {
+    return;
   }
+
+  const { optionsGenerators } = growiFacade.markdownRenderer;
+  const original = optionsGenerators.customGenerateViewOptions;
+
+  optionsGenerators.customGenerateViewOptions = (...args: any[]) => {
+    const options = original
+      ? original(...args)
+      : optionsGenerators.generateViewOptions(...args);
+
+    // 描画に使うReactコンポーネントを差し替える
+    // remark-directive を有効化
+    options.remarkPlugins.push(remarkDirective);
+
+    // 自作のカスタムマップ解析ロジックを注入
+    options.remarkPlugins.push(() => {
+      return (tree: any) => {
+        visit(tree, (node) => {
+          if (node.type === 'containerDirective' && node.name === 'custom-map') {
+            const attributes = node.attributes || {};
+            node.type = 'customMapNode';
+            node.data = {
+              hName: 'div',
+              hProperties: {
+                'data-plugin': 'custom-map',
+                ...attributes
+              }
+            };
+          }
+        });
+      };
+    });
+
+    // rehype / Reactコンポーネントとしての描画マッピングを登録
+    if (options.componentMap) {
+      options.componentMap.customMapNode = (props: any) => {
+        const { file, x, y, text, color, zoom, cropScale, children } = props;
+        return (
+          <MapPopupButton
+            file={file} x={x} y={y} text={text}
+            color={color} zoom={zoom} cropScale={cropScale}
+          >
+            {children}
+          </MapPopupButton>
+        );
+      };
+    }
+    return options;
+  };
 };
 
 // プラグインが無効化されたときのクリーンアップ（空で構いません）
-export const deactivate = () => {
-  // 必要に応じてクリーンアップ処理を記述
+const deactivate = (): void => {
+  // クリーンアップ処理（必要に応じて実装）
+  //
 };
 
-// ⚠️ 【重要】GROWI本体にこのプラグインのアクティベーターを登録する
-if (typeof window !== 'undefined') {
-  const windowAsAny = window as any;
-  windowAsAny.pluginActivators = windowAsAny.pluginActivators || {};
-  windowAsAny.pluginActivators['growi-plugin-custom-map'] = {
-    activate,
-    deactivate,
-  };
+
+// `window.pluginActivators` オブジェクトへの登録
+if ((window as any).pluginActivators == null) {
+  (window as any).pluginActivators = {};
 }
+(window as any).pluginActivators['growi-plugin-my-feature'] = {
+  activate,
+  deactivate,
+};
