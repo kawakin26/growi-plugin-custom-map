@@ -130,7 +130,13 @@ npm run build
 ```
 
 - ソースは `src/client-entry.tsx`
-- ビルド成果物は `dist/client-entry.js`（TypeScript を `tsc` でコンパイル）
+- ビルドには [Vite](https://vitejs.dev/) を使用します（`vite build`、公式スクリプトプラグインと同じ構成）
+- ビルド成果物は `dist/` に出力されます
+  - `dist/assets/client-entry-*.js`: バンドルされたプラグイン本体
+  - `dist/.vite/manifest.json`: ビルドマニフェスト（**GROWI が注入するスクリプトを解決するために必須**）
+
+> [!IMPORTANT]
+> GROWI はインストール時にリポジトリを **ビルドしません**。ZIP に含まれるファイルをそのまま使うため、`dist/`（`.vite/manifest.json` と `assets/` を含む）を **ビルドしてコミットしてから** push してください。manifest が無いと、GROWI はプラグインを検出しても `<script>` を注入せず、記法が反映されません。
 
 ### プロジェクト構成
 
@@ -138,8 +144,12 @@ npm run build
 .
 ├── src/
 │   └── client-entry.tsx   # プラグイン本体（remark 変換 + モーダル UI）
-├── dist/
-│   └── client-entry.js    # ビルド成果物
+├── dist/                  # ビルド成果物（コミット対象）
+│   ├── assets/
+│   │   └── client-entry-*.js
+│   └── .vite/
+│       └── manifest.json
+├── vite.config.ts
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -149,7 +159,15 @@ npm run build
 
 - **画像が表示されない**: `file` / `photo` に指定した名前が、実際にアップロードしたオリジナルファイル名と一致しているか確認してください。また、ストック用ページ（`/media-library` または `src` / `photoSrc` で指定したページ）に画像が添付されているか、そのページの閲覧権限があるかも確認してください。
 - **別ページの画像が解決されない**: プラグインは GROWI の API（`/_api/v3/page`、`/_api/v3/attachment/list`）でページ ID と添付一覧を取得します。GROWI のバージョンによって API のレスポンス構造が異なる場合は、ブラウザの開発者ツールの Network タブでこれらのレスポンスを確認し、`src/client-entry.tsx` の `getPageIdByPath` / `getAttachmentsForPage` の取り出し方を調整してください。
-- **記法が反映されない**: プラグインが有効化されているか、`dist/client-entry.js` が最新のビルドになっているかを確認してください。
+- **記法が反映されない / スクリプトが読み込まれない**: 次を順に確認してください。
+  1. プラグインが管理画面で **有効** になっているか
+  2. リポジトリに `dist/.vite/manifest.json` と `dist/assets/client-entry-*.js` が **コミットされているか**（`npm run build` 後に push したか）
+  3. ページの HTML ソースに `<script src="/static/plugins/{組織名}/{リポジトリ名}/dist/assets/client-entry-*.js">` が注入されているか
+  4. 更新した場合は、GitHub へ push 後に管理画面のプラグインカードで **再インストール**（GROWI は ZIP を取得し直すため push 済みである必要がある）
+  - GROWI がプラグインを配信するパスは `/static/plugins/{組織名}/{リポジトリ名}/...` です（`/plugins/...` ではありません）。
+
+> [!IMPORTANT]
+> インストール時のリポジトリ URL の末尾に `.git` を付けないでください。GROWI が ZIP ダウンロード用パスを組み立てる際に 404 となり失敗します。
 
 ## ライセンス
 
