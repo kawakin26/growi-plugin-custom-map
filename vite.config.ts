@@ -3,14 +3,15 @@ import { defineConfig } from 'vite';
 
 // GROWI script プラグインのビルド設定。
 // manifest: true で dist/manifest.json を生成する。
-// GROWI はこの manifest を参照して注入すべきスクリプトを解決するため必須。
+// GROWI はこの manifest の "client-entry.tsx" エントリを参照して
+// 注入すべきスクリプトを解決するため、エントリはリポジトリ直下に置く。
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   build: {
     manifest: true,
     rollupOptions: {
-      input: ['/src/client-entry.tsx'],
+      input: ['/client-entry.tsx'],
     },
   },
 });
