@@ -19,11 +19,7 @@
       "script"
     ]
   },
-  "dependencies": {
-    "remark-directive": "^2.0.0",
-    "unified": "^10.0.0",
-    "unist-util-visit": "^4.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.3.7",

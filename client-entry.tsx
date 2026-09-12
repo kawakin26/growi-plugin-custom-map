@@ -1,7 +1,15 @@
-import { visit } from 'unist-util-visit';
-import remarkDirective from 'remark-directive';
-
 declare const growiFacade: any;
+
+// ツリーを自前で深さ優先走査する(外部 unist-util-visit をバンドルしないことで、
+// GROWI 本体の micromark/unified 環境とのバージョン不整合を避ける)。
+const walk = (node: any, cb: (node: any) => void): void => {
+  if (node == null) return;
+  cb(node);
+  const children = Array.isArray(node.children) ? node.children : [];
+  for (const child of children) {
+    walk(child, cb);
+  }
+};
 
 // ==========================================
 // 型定義
@@ -603,13 +611,28 @@ const parseMarkerLine = (text: string): MarkerData | null => {
   };
 };
 
-// ノード配下の text ノードを連結して取り出す
+// ノード配下の text ノードを連結して取り出す(自前再帰。visit の副作用を避ける)
 const extractTextFromNode = (node: any): string => {
+  if (node == null) return '';
+  if (node.type === 'text' && typeof node.value === 'string') {
+    return `${node.value} `;
+  }
   let text = '';
-  visit(node, 'text', (textNode: any) => {
-    text += `${textNode.value} `;
-  });
+  const children = Array.isArray(node.children) ? node.children : [];
+  for (const child of children) {
+    text += extractTextFromNode(child);
+  }
   return text;
+};
+
+// ノード配下の listItem を自前再帰で集める
+const collectListItems = (node: any, out: any[]): void => {
+  if (node == null) return;
+  if (node.type === 'listItem') out.push(node);
+  const children = Array.isArray(node.children) ? node.children : [];
+  for (const child of children) {
+    collectListItems(child, out);
+  }
 };
 
 const buildMapData = (node: any): MapData => {
@@ -617,11 +640,13 @@ const buildMapData = (node: any): MapData => {
   const markers: MarkerData[] = [];
 
   // 子ノードのうち listItem を走査してマーカー化
-  visit(node, 'listItem', (listItem: any) => {
+  const listItems: any[] = [];
+  collectListItems(node, listItems);
+  for (const listItem of listItems) {
     const line = extractTextFromNode(listItem).trim();
     const marker = parseMarkerLine(line);
     if (marker) markers.push(marker);
-  });
+  }
 
   return {
     file: attributes.file || '',
@@ -653,24 +678,24 @@ export const activate = (): void => {
       : optionsGenerators.generateViewOptions(...args);
 
     options.remarkPlugins = options.remarkPlugins || [];
-    if (!options.remarkPlugins.includes(remarkDirective)) {
-      options.remarkPlugins.push(remarkDirective);
-    }
+    // remark-directive は GROWI 本体が既に登録しているため、ここでは追加しない。
+    // (自前バンドルすると micromark 拡張が二重になり this.setData エラーになる)
 
     options.remarkPlugins.push(() => (tree: any) => {
-      visit(tree, (node: any) => {
+      walk(tree, (node: any) => {
         if (node.type === 'containerDirective' && node.name === 'custom-map') {
           const mapData = buildMapData(node);
 
-          // 子ノードを空にして、div 一つに置き換える
+          // マーカー抽出後、子ノードを空にして 1 つの div にする。
+          // node.data を丸ごと再代入すると remark-directive の内部処理
+          // (this.setData 前提) と衝突するため、既存 data を保持して代入する。
           node.children = [];
-          node.data = {
-            hName: 'div',
-            hProperties: {
-              'data-plugin': 'custom-map',
-              'data-link': (node.attributes || {}).link || 'マップを開く',
-              'data-map': JSON.stringify(mapData),
-            },
+          const data = node.data || (node.data = {});
+          data.hName = 'div';
+          data.hProperties = {
+            'data-plugin': 'custom-map',
+            'data-link': (node.attributes || {}).link || 'マップを開く',
+            'data-map': JSON.stringify(mapData),
           };
         }
       });
