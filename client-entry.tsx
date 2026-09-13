@@ -764,9 +764,6 @@ const buildMapData = (node: any): MapData => {
   for (const listItem of listItems) {
     const line = extractTextFromNode(listItem).trim();
     const marker = parseMarkerLine(line);
-    // デバッグ: 実際に抽出された行テキストと解析結果を確認する
-    // eslint-disable-next-line no-console
-    console.log('[custom-map] marker line =', JSON.stringify(line), '=> parsed =', marker);
     if (marker) markers.push(marker);
   }
 
