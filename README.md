@@ -13,7 +13,9 @@
 - モーダル内で **ドラッグ移動（パン）** と **ホイール拡大縮小（ズーム）**
 - マーカー / ラベルの **左クリック・タップで最小化・再表示をトグル**（ラベルで隠れた部分を確認できる）
 - 最小化中のマーカーは **小さな点** で表示し、指定秒後に **自動復帰**（既定 15 秒）
-- マーカー / ラベルの **右クリック・ロングタップで参照写真をポップアップ**
+- マーカー / ラベルの **右クリック・ロングタップで参照写真・説明文をポップアップ**
+- マーカーに **説明文 / 注意書き（`desc`）** を設定でき、設定したマーカーは **ピンが点滅** して存在を知らせる
+- （任意）CAD 図面（`.dxf` / `.jww`）を **変換 API 経由で画像化して表示**（API 未設定時は従来の画像運用のみで動作）
 
 ## インストール
 
@@ -42,8 +44,8 @@ Markdown の [ディレクティブ記法](https://github.com/remarkjs/remark-di
 ````md
 :::custom-map{file="1F平面図.png" cx="50" cy="40" scale="2" link="1階の案内図を開く" restore="15"}
 - x=30 y=40 label="受付" photo="reception.jpg" color="#ff3b30"
-- x=70 y=55 label="会議室A" photo="room_a.jpg"
-- x=20 y=80 label="非常口" photo="exit.jpg" color="#34c759"
+- x=70 y=55 label="会議室A" photo="room_a.jpg" desc="予約制|内線 101"
+- x=20 y=80 label="非常口" photo="exit.jpg" color="#34c759" desc="施錠注意|夜間は警備室へ連絡"
 :::
 ````
 
@@ -71,6 +73,7 @@ Markdown の [ディレクティブ記法](https://github.com/remarkjs/remark-di
 | `label` | マーカーに表示するラベルテキスト | なし |
 | `photo` | 右クリック / ロングタップで表示する参照写真のオリジナルファイル名 | なし |
 | `photoSrc` | 参照写真を探すページのパス | 記法を書いたページ → 地図の解決先 |
+| `desc` | 説明文 / 注意書き（`\|` で改行）。設定するとピンが**点滅**し、右クリック / ロングタップのポップアップに表示される | なし |
 | `color` | ピンとラベルの色（CSS カラー） | `#ff3b30` |
 
 > [!TIP]
@@ -84,7 +87,7 @@ Markdown の [ディレクティブ記法](https://github.com/remarkjs/remark-di
 | モーダル内でドラッグ | 表示位置を移動（パン） |
 | モーダル内でホイール操作 | カーソル位置を中心に拡大 / 縮小（ズーム） |
 | マーカー / ラベルを左クリック・タップ | そのマーカーとラベルを最小化 / 再表示（トグル） |
-| マーカー / ラベルを右クリック・ロングタップ | 参照写真をポップアップ表示 |
+| マーカー / ラベルを右クリック・ロングタップ | 参照写真・説明文をポップアップ表示 |
 | 背景クリック / × ボタン | 閉じる |
 
 最小化したマーカーは小さな点として表示され、`restore` で指定した秒数（既定 15 秒）が経過すると自動的に元へ戻ります。
@@ -103,10 +106,40 @@ Markdown の [ディレクティブ記法](https://github.com/remarkjs/remark-di
 規定ページ名を変更したい場合は、GROWI の [カスタムスクリプト（`layout-script` など）](https://docs.growi.org/) に次を追加してください。
 
 ```js
-window.GROWI_CUSTOM_MAP_CONFIG = { defaultSrc: '/system/media-library' };
+window.GROWI_CUSTOM_MAP_CONFIG = {
+  defaultSrc: '/system/media-library',
+  // CAD 変換 API を使う場合のみ設定（任意）。未設定なら CAD 機能はオフ。
+  cadConvertApi: 'https://cad.example.com/convert',
+};
 ```
 
 未設定の場合は `/media-library` が使われます。
+
+## CAD 図面の利用（任意）
+
+`file` に CAD 図面（`.dxf` / `.jww`）を指定できます。ただし変換は **外部の変換 API** に委ねる設計です。
+
+- `window.GROWI_CUSTOM_MAP_CONFIG.cadConvertApi` に変換 API のエンドポイントを設定すると、`file` が CAD ファイルのとき、プラグインが変換 API に問い合わせて **変換済み画像**を取得して表示します。
+- 変換 API が **未設定・未稼働・変換失敗** の場合は、通常の添付解決 → 静的パスへ**フォールバック**します。CAD を使わない運用ではこの設定は不要で、従来どおり画像ファイル（PNG など）だけで動作します。
+
+### 変換 API のインターフェース（想定）
+
+プラグインは次の形で問い合わせます。
+
+```
+GET {cadConvertApi}?file=<CADファイル名>&src=<ページパス>
+```
+
+期待するレスポンス（JSON）:
+
+```json
+{ "imageUrl": "/path/to/converted.png", "status": "ok" }
+```
+
+- `imageUrl`: 変換済み画像の URL（`url` でも可）
+- `status`: `ok` 以外はフォールバック扱い
+- API 側は **キャッシュ前提**（元 CAD が更新されていなければ変換済み画像を再利用）でサーバー負荷を抑える想定です。
+- 現時点の対応方針: **DXF を優先**し、JWW は変換の実現性を見て順次検討します。
 
 ### 画像の解決順
 

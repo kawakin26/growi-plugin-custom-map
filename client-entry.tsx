@@ -11,6 +11,24 @@ const walk = (node: any, cb: (node: any) => void): void => {
   }
 };
 
+// desc(注意書き)付きマーカーのピンを点滅させる CSS を一度だけ注入する。
+// JS で制御せず CSS アニメーションに任せるためリソース負荷は最小。
+const ensureBlinkStyle = (): void => {
+  const id = 'growi-custom-map-blink-style';
+  if (document.getElementById(id)) return;
+  const style = document.createElement('style');
+  style.id = id;
+  style.textContent = `
+@keyframes growi-custom-map-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.growi-custom-map-pin-blink {
+  animation: growi-custom-map-blink 1.2s ease-in-out infinite;
+}`;
+  document.head.appendChild(style);
+};
+
 // ==========================================
 // 型定義
 // ==========================================
@@ -20,6 +38,7 @@ interface MarkerData {
   label: string;    // ラベルテキスト
   photo: string;    // 右クリック/ロングタップで表示する写真のファイル名
   photoSrc: string; // 写真を探す参照ページのパス(未指定なら現在ページ→地図の解決先)
+  desc: string;     // 説明文/注意書き('|' で改行)。設定時はピンが点滅する
   color: string;    // ピンの色
 }
 
@@ -45,6 +64,22 @@ const getDefaultStockPage = (): string => {
   const cfg = (window as any).GROWI_CUSTOM_MAP_CONFIG;
   const v = cfg && typeof cfg.defaultSrc === 'string' ? cfg.defaultSrc.trim() : '';
   return v || DEFAULT_STOCK_PAGE;
+};
+
+// CAD 変換 API のエンドポイント。window.GROWI_CUSTOM_MAP_CONFIG.cadConvertApi で設定。
+// 未設定なら CAD 変換機能はオフ(従来の画像添付運用のみで動作する)。
+const getCadConvertApi = (): string => {
+  const cfg = (window as any).GROWI_CUSTOM_MAP_CONFIG;
+  const v = cfg && typeof cfg.cadConvertApi === 'string' ? cfg.cadConvertApi.trim() : '';
+  return v;
+};
+
+// 拡張子から CAD ファイルかどうかを判定する
+const CAD_EXTENSIONS = ['.dxf', '.jww'];
+const isCadFile = (fileName: string): boolean => {
+  if (!fileName) return false;
+  const lower = fileName.toLowerCase();
+  return CAD_EXTENSIONS.some((ext) => lower.endsWith(ext));
 };
 
 // 添付一覧を「ページパス単位」でキャッシュする(同一ページの複数マーカーで API を使い回す)
@@ -216,6 +251,50 @@ const getPhotoCandidatePages = (mapData: MapData, marker: MarkerData): string[] 
   return Array.from(new Set(pages.filter(Boolean)));
 };
 
+// CAD 変換 API に問い合わせて、変換済み画像 URL を得る。
+// API 側はキャッシュ前提(CAD が更新されていなければ変換済み画像を返す)。
+// 失敗時や未設定時は null を返し、呼び出し側で通常の添付解決にフォールバックする。
+const resolveCadImageUrl = async (mapData: MapData): Promise<string | null> => {
+  const api = getCadConvertApi();
+  if (!api) return null; // API 未設定 → CAD 機能オフ
+
+  // CAD の元ファイルがどのページにあるかの候補(地図と同じ解決先)
+  const src = mapData.src || getDefaultStockPage();
+  try {
+    const sep = api.includes('?') ? '&' : '?';
+    const url = `${api}${sep}file=${encodeURIComponent(mapData.file)}&src=${encodeURIComponent(src)}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(`cad convert api failed: ${res.status}`);
+    const data = await res.json();
+    const imageUrl = data?.imageUrl || data?.url;
+    if (data?.status && data.status !== 'ok') {
+      throw new Error(`cad convert api status: ${data.status}`);
+    }
+    return typeof imageUrl === 'string' && imageUrl ? imageUrl : null;
+  } catch (e) {
+    console.warn('[custom-map] CAD conversion unavailable, falling back to attachment', e);
+    return null;
+  }
+};
+
+// 地図画像の URL を解決する。
+// CAD ファイル(.dxf/.jww)かつ変換 API が有効なら変換画像を優先。
+// それ以外・失敗時は通常の添付解決 → 静的パスの順にフォールバック。
+const resolveMapImageUrl = async (mapData: MapData): Promise<string> => {
+  if (isCadFile(mapData.file)) {
+    const cadUrl = await resolveCadImageUrl(mapData);
+    if (cadUrl) return cadUrl;
+    // API が無い/失敗した場合でも、同名の変換済み画像が添付されていれば拾える可能性は低いが、
+    // 最終的には静的パスへフォールバックして「壊れない」動作にする。
+  }
+  const attachmentUrl = await resolveAttachmentUrl(mapData.file, getMapCandidatePages(mapData));
+  return attachmentUrl || `/images/maps/${mapData.file}`;
+};
+
 // ==========================================
 // モーダルの生成と各種インタラクション
 // ==========================================
@@ -224,9 +303,8 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
   const oldModal = document.getElementById('growi-custom-map-modal');
   if (oldModal) oldModal.remove();
 
-  // 地図画像 URL を候補ページから解決(見つからなければフォールバック)
-  const imageUrl = (await resolveAttachmentUrl(mapData.file, getMapCandidatePages(mapData)))
-    || `/images/maps/${mapData.file}`;
+  // 地図画像 URL を解決(CAD なら変換 API を優先、無ければ通常の添付解決にフォールバック)
+  const imageUrl = await resolveMapImageUrl(mapData);
 
   // ─── モーダル外枠 ───
   const modal = document.createElement('div');
@@ -400,6 +478,8 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
     transform: 'translate(-50%, -50%)', zIndex: '5',
   });
 
+  const hasDesc = !!(marker.desc && marker.desc.trim());
+
   // ─── ピン本体 ───
   const pin = document.createElement('div');
   Object.assign(pin.style, {
@@ -408,6 +488,11 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
     boxShadow: '0 2px 5px rgba(0,0,0,0.4)', cursor: 'pointer',
     transition: 'width 0.15s ease, height 0.15s ease, opacity 0.15s ease',
   });
+  // 説明文/注意書きがあるマーカーは点滅させて存在を示す
+  if (hasDesc) {
+    ensureBlinkStyle();
+    pin.classList.add('growi-custom-map-pin-blink');
+  }
 
   // ─── ラベル ───
   const labelEl = document.createElement('div');
@@ -425,7 +510,8 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
 
   const minimize = (): void => {
     minimized = true;
-    // ピンを小さな点に
+    // ピンを小さな点に(点滅は止めて控えめに)
+    if (hasDesc) pin.classList.remove('growi-custom-map-pin-blink');
     Object.assign(pin.style, { width: '6px', height: '6px', borderWidth: '1px', opacity: '0.6' });
     if (marker.label) labelEl.style.display = 'none';
 
@@ -437,6 +523,8 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
   const restore = (): void => {
     minimized = false;
     Object.assign(pin.style, { width: '18px', height: '18px', borderWidth: '2px', opacity: '1' });
+    // 説明文付きなら点滅を再開
+    if (hasDesc) pin.classList.add('growi-custom-map-pin-blink');
     if (marker.label) labelEl.style.display = '';
     if (restoreTimer) {
       window.clearTimeout(restoreTimer);
@@ -449,16 +537,23 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
     else minimize();
   };
 
-  const showPhoto = (): void => {
-    if (!marker.photo) return;
+  // 右クリック/ロングタップ: 写真と説明文をポップアップ表示する。
+  // 写真も説明文も無ければ何もしない。
+  const showDetail = (): void => {
+    if (!marker.photo && !hasDesc) return;
+    if (!marker.photo) {
+      // 写真なし・説明文のみ
+      openDetailPopup('', marker.label, marker.desc);
+      return;
+    }
     // 写真の候補ページ(photoSrc → 現在ページ → 地図の解決先)から URL を解決
     resolveAttachmentUrl(marker.photo, getPhotoCandidatePages(mapData, marker))
       .then((url) => {
-        openPhotoPopup(url || `/images/maps/${marker.photo}`, marker.label);
+        openDetailPopup(url || `/images/maps/${marker.photo}`, marker.label, marker.desc);
       })
       .catch((err) => {
         console.error('[custom-map] failed to resolve photo', marker.photo, err);
-        openPhotoPopup(`/images/maps/${marker.photo}`, marker.label);
+        openDetailPopup(`/images/maps/${marker.photo}`, marker.label, marker.desc);
       });
   };
 
@@ -468,7 +563,7 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
     elForActions.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      showPhoto();
+      showDetail();
     });
 
     // ロングタップ判定用の状態
@@ -487,7 +582,7 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
         if (longPressTimer) window.clearTimeout(longPressTimer);
         longPressTimer = window.setTimeout(() => {
           longPressed = true;
-          showPhoto();
+          showDetail();
         }, 500);
       }
     });
@@ -535,9 +630,12 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
 };
 
 // ==========================================
-// マーカー写真のポップアップ (photoUrl は解決済み URL)
+// マーカー詳細のポップアップ
+//   photoUrl: 解決済み写真 URL(空文字なら写真なし)
+//   caption : ラベル(見出しとして表示)
+//   desc    : 説明文/注意書き('|' で改行)
 // ==========================================
-const openPhotoPopup = (photoUrl: string, caption: string): void => {
+const openDetailPopup = (photoUrl: string, caption: string, desc: string): void => {
   const old = document.getElementById('growi-custom-map-photo');
   if (old) old.remove();
 
@@ -549,23 +647,39 @@ const openPhotoPopup = (photoUrl: string, caption: string): void => {
     flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: '10000',
   });
 
-  const photo = document.createElement('img');
-  photo.src = photoUrl;
-  photo.alt = caption || '';
-  Object.assign(photo.style, {
-    maxWidth: '85vw', maxHeight: '80vh', borderRadius: '6px',
-    boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
-  });
+  // 写真がある場合のみ画像を表示
+  if (photoUrl) {
+    const photo = document.createElement('img');
+    photo.src = photoUrl;
+    photo.alt = caption || '';
+    Object.assign(photo.style, {
+      maxWidth: '85vw', maxHeight: '75vh', borderRadius: '6px',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+    });
+    overlay.appendChild(photo);
+  }
 
-  overlay.appendChild(photo);
-
+  // 見出し(ラベル)
   if (caption) {
     const cap = document.createElement('div');
     cap.innerText = caption;
     Object.assign(cap.style, {
-      color: '#fff', marginTop: '12px', fontSize: '14px', textAlign: 'center',
+      color: '#fff', marginTop: '12px', fontSize: '16px', fontWeight: 'bold',
+      textAlign: 'center',
     });
     overlay.appendChild(cap);
+  }
+
+  // 説明文/注意書き('|' を改行として表示)
+  if (desc && desc.trim()) {
+    const descEl = document.createElement('div');
+    descEl.innerText = desc.split('|').join('\n');
+    Object.assign(descEl.style, {
+      color: '#fff', marginTop: '10px', fontSize: '14px', lineHeight: '1.6',
+      textAlign: 'center', whiteSpace: 'pre-wrap', maxWidth: '85vw',
+      background: 'rgba(255,255,255,0.08)', padding: '10px 16px', borderRadius: '6px',
+    });
+    overlay.appendChild(descEl);
   }
 
   overlay.addEventListener('click', () => overlay.remove());
@@ -607,6 +721,7 @@ const parseMarkerLine = (text: string): MarkerData | null => {
     label: attrs.label || '',
     photo: attrs.photo || '',
     photoSrc: attrs.photoSrc || attrs.photosrc || '',
+    desc: attrs.desc || '',
     color: attrs.color || '#ff3b30',
   };
 };
