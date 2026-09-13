@@ -726,11 +726,15 @@ const parseMarkerLine = (text: string): MarkerData | null => {
   };
 };
 
-// ノード配下の text ノードを連結して取り出す(自前再帰。visit の副作用を避ける)
+// ノード配下の text ノードを連結して取り出す(自前再帰。visit の副作用を避ける)。
+// スペースを勝手に挿入すると desc="a|b" のような値が壊れるため、
+// text ノードの value をそのまま連結する。
+// また、markdown が半角スペースを含む属性値を分割することがあるため、
+// inlineCode(``) など text 以外の値も拾って連結する。
 const extractTextFromNode = (node: any): string => {
   if (node == null) return '';
-  if (node.type === 'text' && typeof node.value === 'string') {
-    return `${node.value} `;
+  if (typeof node.value === 'string' && (node.type === 'text' || node.type === 'inlineCode')) {
+    return node.value;
   }
   let text = '';
   const children = Array.isArray(node.children) ? node.children : [];
@@ -760,6 +764,9 @@ const buildMapData = (node: any): MapData => {
   for (const listItem of listItems) {
     const line = extractTextFromNode(listItem).trim();
     const marker = parseMarkerLine(line);
+    // デバッグ: 実際に抽出された行テキストと解析結果を確認する
+    // eslint-disable-next-line no-console
+    console.log('[custom-map] marker line =', JSON.stringify(line), '=> parsed =', marker);
     if (marker) markers.push(marker);
   }
 
