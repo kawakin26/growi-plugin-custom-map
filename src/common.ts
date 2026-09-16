@@ -142,3 +142,46 @@ export const toNumber = (value: string | null | undefined, fallback: number): nu
 };
 
 export const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
+
+// 背景色(#rgb / #rrggbb / rgb(...) 等)に対して読みやすい文字色(黒/白)を返す。
+// 輝度が高い(明るい)背景なら黒、暗い背景なら白。淡色ラベルでも読めるようにする。
+export const textColorForBg = (bg: string): string => {
+  const rgb = parseColorToRgb(bg);
+  if (!rgb) return '#ffffff'; // 解釈できないときは従来どおり白
+  const { r, g, b } = rgb;
+  // 相対輝度(sRGB 近似)。0(暗)〜255(明)。
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+  return luminance > 150 ? '#000000' : '#ffffff';
+};
+
+// 色文字列を RGB に解釈する。#rgb / #rrggbb / rgb(r,g,b) に対応。
+const parseColorToRgb = (color: string): { r: number; g: number; b: number } | null => {
+  if (!color) return null;
+  const c = color.trim().toLowerCase();
+
+  // #rrggbb または #rgb
+  const hexMatch = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
+  if (hexMatch) {
+    let hex = hexMatch[1];
+    if (hex.length === 3) {
+      hex = hex.split('').map((ch) => ch + ch).join('');
+    }
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+
+  // rgb(r, g, b) / rgba(r, g, b, a)
+  const rgbMatch = c.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (rgbMatch) {
+    return {
+      r: Number(rgbMatch[1]),
+      g: Number(rgbMatch[2]),
+      b: Number(rgbMatch[3]),
+    };
+  }
+
+  return null;
+};

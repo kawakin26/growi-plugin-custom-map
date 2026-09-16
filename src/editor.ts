@@ -4,6 +4,7 @@ import {
   attachmentUrl,
   attachmentName,
   clamp,
+  textColorForBg,
   type Attachment,
 } from './common';
 
@@ -426,7 +427,8 @@ const openMapPreviewModal = (att: Attachment): void => {
         label.textContent = m.label;
         Object.assign(label.style, {
           position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
-          backgroundColor: m.color || DEFAULT_MARKER_COLOR, color: '#fff', padding: '2px 6px',
+          backgroundColor: m.color || DEFAULT_MARKER_COLOR,
+          color: textColorForBg(m.color || DEFAULT_MARKER_COLOR), padding: '2px 6px',
           borderRadius: '4px', fontSize: '11px', whiteSpace: 'nowrap', pointerEvents: 'none',
         });
         inner.appendChild(label);

@@ -6,6 +6,7 @@ import {
   resolveAttachmentUrl,
   toNumber,
   clamp,
+  textColorForBg,
 } from './common';
 
 // ============================================================
@@ -416,7 +417,7 @@ const createMarker = (
   labelEl.innerText = marker.label || '';
   Object.assign(labelEl.style, {
     position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
-    backgroundColor: color, color: '#fff', padding: '4px 8px', borderRadius: '4px',
+    backgroundColor: color, color: textColorForBg(color), padding: '4px 8px', borderRadius: '4px',
     fontSize: '12px', whiteSpace: 'nowrap', boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
     cursor: 'pointer', userSelect: 'none', transition: 'opacity 0.15s ease',
   });
