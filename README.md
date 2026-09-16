@@ -128,17 +128,39 @@ GUI を使わず、Markdown の [ディレクティブ記法](https://github.com
 
 `src` を省略したときの平面図画像の参照先は、既定で `/media-library` ページです。ここに平面図をまとめて添付しておけば、各ページでは `file` を指定するだけで参照できます。GUI 編集の画像一覧も、このページの画像を表示します。
 
-規定ページ名を変更したい場合や CAD 変換 API を使う場合は、GROWI の [カスタムスクリプト](https://docs.growi.org/) に次を追加してください。
+規定ページ名を変更したい場合や CAD 変換 API を使う場合は、後述の **設定（`GROWI_CUSTOM_MAP_CONFIG`）** で `defaultSrc` / `cadConvertApi` を指定します。未設定の場合、`defaultSrc` は `/media-library` が使われ、CAD 変換機能はオフになります。
+
+## 設定（`GROWI_CUSTOM_MAP_CONFIG`）
+
+規定ストックページの変更や CAD 変換 API の利用は、`window.GROWI_CUSTOM_MAP_CONFIG` というグローバル設定で行います。**この設定は任意** で、未設定でも（画像運用なら）動作します。
+
+### どこに書くか
+
+GROWI 管理画面の **カスタマイズ画面（`/admin/customize`）→ 「カスタムスクリプト」** 欄に、次の JavaScript を貼り付けて保存します。設定は全ページに読み込まれます。
 
 ```js
 window.GROWI_CUSTOM_MAP_CONFIG = {
+  // 平面図・写真を探す既定のストックページ。省略時は /media-library。
   defaultSrc: '/media-library',
-  // CAD 変換 API を使う場合のみ設定（任意）。未設定なら CAD 機能はオフ。
-  cadConvertApi: 'https://example.com/cad/convert',
+
+  // CAD 変換 API のエンドポイント。CAD(.dxf/.jww)を使う場合のみ設定する。
+  // 末尾は変換エンドポイント(/convert)まで含める。未設定なら CAD 機能はオフ。
+  cadConvertApi: 'https://<GROWIと同じドメイン>/cad/convert',
 };
 ```
 
-未設定の場合、`defaultSrc` は `/media-library` が使われ、CAD 変換機能はオフになります。
+> [!NOTE]
+> 保存後、ページを再読み込み（必要ならハードリロード）すると反映されます。カスタムスクリプトは全ページで実行されるため、`window.GROWI_CUSTOM_MAP_CONFIG` の代入だけを書けば十分です。
+
+### 各項目
+
+| キー | 説明 | 省略時 |
+|------|------|--------|
+| `defaultSrc` | `src` / `photoSrc` 省略時に画像を探すストックページのパス。GUI 編集の画像一覧もここを見る | `/media-library` |
+| `cadConvertApi` | CAD 変換 API の `/convert` エンドポイント URL。設定すると `.dxf` / `.jww` を変換して表示する。未設定なら CAD 機能オフ | なし |
+
+> [!TIP]
+> `cadConvertApi` は、変換 API を **GROWI と同じドメインのサブパス**（例 `https://gw.example.com/cad/convert`）にリバースプロキシで配置すると、CORS を気にせず使えます。設定の詳細は [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) を参照してください。
 
 ## CAD 図面の利用（任意）
 
@@ -147,9 +169,11 @@ window.GROWI_CUSTOM_MAP_CONFIG = {
 - `window.GROWI_CUSTOM_MAP_CONFIG.cadConvertApi` に変換 API のエンドポイントを設定すると、`file` が CAD ファイルのとき、プラグインが変換 API に問い合わせて **変換済み画像（SVG）** を取得して表示します。
 - 変換 API が **未設定・未稼働・変換失敗** の場合は、通常の添付解決 → 静的パスへ **フォールバック** します。
 
-### 変換 API のインターフェース
+### プラグインからの呼び出し方（方式1）
 
-プラグインは次の形で問い合わせます。
+変換 API には CAD の取得方式が 3 つありますが、**このプラグインは常に「方式1（サーバーが GROWI から添付を取得する方式）」で呼び出します**。プラグインはファイル名とページパスだけを渡し、API サーバーが GROWI から CAD ファイルを取得して変換します。
+
+プラグインが送るリクエスト:
 
 ```
 GET {cadConvertApi}?file=<CADファイル名>&src=<ページパス>
@@ -163,7 +187,21 @@ GET {cadConvertApi}?file=<CADファイル名>&src=<ページパス>
 
 - `imageUrl`: 変換済み画像の URL（`url` でも可）
 - `status`: `ok` 以外はフォールバック扱い
-- API 側はキャッシュ前提（元 CAD が更新されていなければ変換済み画像を再利用）です。詳細は [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) を参照してください。
+
+### API 側の取得方式（A / B / C）とトークン設定
+
+変換 API サーバー側には 3 つの取得方式があります（プラグインが使うのは **方式1** のみ。方式2・3 は curl や他システムから API を直接使う場合の選択肢です）。
+
+| 方式 | 呼び出し | 用途 | GROWI 認証 |
+|------|----------|------|-----------|
+| **方式1**（このプラグインが使用）| `GET /convert?file=<名>&src=<ページパス>` | API サーバーが GROWI トークンで添付を取得 | **サーバーが保持するトークンが必要** |
+| 方式2 | `POST /convert`（body に CAD バイト列）| 取得済みファイルを直接送る | 不要 |
+| 方式3 | `GET /convert?url=<絶対URL>` | 公開 URL から取得 | 不要（既定で無効）|
+
+このプラグインは方式1 を使うため、**API サーバー側に GROWI のベース URL とアクセストークンの設定が必要** です。トークンは API サーバーの環境変数（`GROWI_BASE_URL` / `GROWI_TOKEN`）に設定するもので、**このプラグインの記法やカスタムスクリプトには一切書きません**（ブラウザにトークンが露出しません）。
+
+- 必要なトークンのスコープ、認証方式（Bearer / クエリ）、`.env` の書き方、リバースプロキシ設定などの **API サーバー側の設定は、すべて [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) の README** を参照してください。
+- API 側はキャッシュ前提（元 CAD が更新されていなければ変換済み画像を再利用）で、サーバー負荷を抑えます。
 
 ### 画像の解決順
 
