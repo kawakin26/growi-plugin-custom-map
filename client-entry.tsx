@@ -408,40 +408,101 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
     markerInners.push(inner);
   });
 
-  // ─── ドラッグでパン ───
-  let dragging = false;
-  let startX = 0;
-  let startY = 0;
-  let startTx = 0;
-  let startTy = 0;
+  // ─── パン(1本指/マウス) と ピンチズーム(2本指) ───
+  // アクティブなポインタを管理し、1 本ならパン、2 本ならピンチズームにする。
+  const pointers = new Map<number, { x: number; y: number }>();
+  // パン用
+  let panStartTx = 0;
+  let panStartTy = 0;
+  let panStartX = 0;
+  let panStartY = 0;
+  // ピンチ用(2 本指の初期距離・中点・そのときの view)
+  let pinchStartDist = 0;
+  let pinchStartScale = 1;
+  let pinchStartTx = 0;
+  let pinchStartTy = 0;
+  let pinchCenter = { x: 0, y: 0 };
+
+  const vpPoint = (clientX: number, clientY: number): { x: number; y: number } => {
+    const rect = viewport.getBoundingClientRect();
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  };
+
+  const beginPinch = (): void => {
+    const pts = Array.from(pointers.values());
+    const [a, b] = pts;
+    pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    pinchStartScale = view.scale;
+    pinchStartTx = view.tx;
+    pinchStartTy = view.ty;
+    const midClientX = (a.x + b.x) / 2;
+    const midClientY = (a.y + b.y) / 2;
+    pinchCenter = vpPoint(midClientX, midClientY);
+  };
 
   viewport.addEventListener('pointerdown', (e: PointerEvent) => {
-    // マーカー等の操作はパンにしない
+    // マーカー等の操作はパン/ズームにしない
     if ((e.target as HTMLElement).closest('[data-map-marker]')) return;
-    dragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    startTx = view.tx;
-    startTy = view.ty;
-    viewport.style.cursor = 'grabbing';
-    viewport.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { viewport.setPointerCapture(e.pointerId); } catch { /* noop */ }
+
+    if (pointers.size === 1) {
+      // パン開始
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      panStartTx = view.tx;
+      panStartTy = view.ty;
+      viewport.style.cursor = 'grabbing';
+    } else if (pointers.size === 2) {
+      // ピンチ開始(パンより優先)
+      beginPinch();
+    }
   });
 
   viewport.addEventListener('pointermove', (e: PointerEvent) => {
-    if (!dragging) return;
-    view.tx = startTx + (e.clientX - startX);
-    view.ty = startTy + (e.clientY - startY);
-    applyTransform();
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size >= 2) {
+      // ─── ピンチズーム ───
+      const pts = Array.from(pointers.values());
+      const [a, b] = pts;
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const factor = dist / pinchStartDist;
+      const newScale = clamp(pinchStartScale * factor, 0.02, 40);
+      // 中点(ピンチ開始時のビューポート座標)を固定点にしてズーム
+      const ratio = newScale / pinchStartScale;
+      view.tx = pinchCenter.x - (pinchCenter.x - pinchStartTx) * ratio;
+      view.ty = pinchCenter.y - (pinchCenter.y - pinchStartTy) * ratio;
+      view.scale = newScale;
+      applyTransform();
+    } else if (pointers.size === 1) {
+      // ─── パン ───
+      view.tx = panStartTx + (e.clientX - panStartX);
+      view.ty = panStartTy + (e.clientY - panStartY);
+      applyTransform();
+    }
   });
 
-  const endDrag = (e: PointerEvent): void => {
-    if (!dragging) return;
-    dragging = false;
-    viewport.style.cursor = 'grab';
+  const endPointer = (e: PointerEvent): void => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
     try { viewport.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+
+    if (pointers.size === 1) {
+      // ピンチ→1 本残ったらパンに切り替え(残ったポインタ基準で再初期化)
+      const [p] = Array.from(pointers.values());
+      panStartX = p.x;
+      panStartY = p.y;
+      panStartTx = view.tx;
+      panStartTy = view.ty;
+      viewport.style.cursor = 'grabbing';
+    } else if (pointers.size === 0) {
+      viewport.style.cursor = 'grab';
+    }
   };
-  viewport.addEventListener('pointerup', endDrag);
-  viewport.addEventListener('pointercancel', endDrag);
+  viewport.addEventListener('pointerup', endPointer);
+  viewport.addEventListener('pointercancel', endPointer);
 
   // ─── ホイールでズーム（カーソル位置を中心に） ───
   viewport.addEventListener('wheel', (e: WheelEvent) => {
@@ -536,9 +597,11 @@ const createMarker = (
 
   const minimize = (): void => {
     minimized = true;
-    // ピンを小さな点に(点滅は止めて控えめに)
-    if (hasDesc) pin.classList.remove('growi-custom-map-pin-blink');
-    Object.assign(pin.style, { width: '2px', height: '2px', borderWidth: '1px', opacity: '0.6' });
+    // 最小化中はラベルを隠す。ピンは見えるサイズを保ったまま点滅させ、
+    // 「隠れている状態」を示す(点で消えて再クリックできなくなるのを防ぐ)。
+    ensureBlinkStyle();
+    pin.classList.add('growi-custom-map-pin-blink');
+    Object.assign(pin.style, { width: '6px', height: '6px', borderWidth: '1px', opacity: '1' });
     if (marker.label) labelEl.style.display = 'none';
 
     // 指定秒後に自動復帰
@@ -549,8 +612,9 @@ const createMarker = (
   const restore = (): void => {
     minimized = false;
     Object.assign(pin.style, { width: '6px', height: '6px', borderWidth: '1px', opacity: '1' });
-    // 説明文付きなら点滅を再開
+    // 通常表示に戻す。点滅は説明文付きマーカーのみ(元の仕様)。
     if (hasDesc) pin.classList.add('growi-custom-map-pin-blink');
+    else pin.classList.remove('growi-custom-map-pin-blink');
     if (marker.label) labelEl.style.display = '';
     if (restoreTimer) {
       window.clearTimeout(restoreTimer);
