@@ -1,0 +1,798 @@
+import {
+  getDefaultStockPage,
+  getAttachmentsForPage,
+  attachmentUrl,
+  attachmentName,
+  clamp,
+  type Attachment,
+} from './common';
+
+// ============================================================
+// 編集(editor)機能: 編集画面にフローティングボタンを出し、GUI で平面図に
+// マーカーを配置して :::custom-map 記法を生成・カーソル位置に挿入する。
+// (元 growi-plugin-custom-map-editor の client-entry.tsx を移設。共通部は
+//  common.ts から import し、editor 固有ロジックのみをここに置く)
+// ============================================================
+
+const BTN_ID = 'growi-custom-map-editor-fab';
+const MODAL_ID = 'growi-custom-map-editor-modal';
+
+// 表示対象にする画像拡張子
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'];
+const isImageName = (name: string): boolean => {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  return IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+};
+
+// ============================================================
+// 編集用データモデル(表示プラグインの記法に対応)
+// ============================================================
+interface EditorMarker {
+  x: number;
+  y: number;
+  label: string;
+  photo: string;
+  color: string;
+  desc: string;
+}
+
+interface EditorMapSettings {
+  file: string;
+  src: string;
+  cx: number;
+  cy: number;
+  scale: number;
+  link: string;
+  restore: number;
+}
+
+const DEFAULT_MARKER_COLOR = '#ff3b30';
+
+// マーカー色のプリセット(パレット表示用)
+const PRESET_COLORS = [
+  '#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#5ac8fa', '#007aff',
+  '#af52de', '#ff2d55', '#000000', '#8e8e93', '#ffffff',
+];
+
+const round1 = (v: number): number => Math.round(v * 10) / 10;
+
+// 文字列属性を key="value" 形式にする。値内のダブルクォートは退避。
+const attrStr = (key: string, value: string): string => `${key}="${value.replace(/"/g, '\\"')}"`;
+
+// EditorMapSettings + markers から :::custom-map 記法を生成する。
+const buildCustomMapSnippet = (settings: EditorMapSettings, markers: EditorMarker[]): string => {
+  const attrs: string[] = [attrStr('file', settings.file)];
+  if (settings.src) attrs.push(attrStr('src', settings.src));
+  if (settings.cx !== 50) attrs.push(`cx="${round1(settings.cx)}"`);
+  if (settings.cy !== 50) attrs.push(`cy="${round1(settings.cy)}"`);
+  if (settings.scale !== 1) attrs.push(`scale="${settings.scale}"`);
+  if (settings.link && settings.link !== 'マップを開く') attrs.push(attrStr('link', settings.link));
+  if (settings.restore !== 15) attrs.push(`restore="${settings.restore}"`);
+
+  const lines: string[] = [];
+  lines.push(`:::custom-map{${attrs.join(' ')}}`);
+
+  for (const m of markers) {
+    const parts: string[] = [`x=${round1(m.x)}`, `y=${round1(m.y)}`];
+    if (m.label) parts.push(attrStr('label', m.label));
+    if (m.photo) parts.push(attrStr('photo', m.photo));
+    if (m.color && m.color.toLowerCase() !== DEFAULT_MARKER_COLOR) parts.push(attrStr('color', m.color));
+    if (m.desc) parts.push(attrStr('desc', m.desc));
+    lines.push(`- ${parts.join(' ')}`);
+  }
+
+  lines.push(':::');
+  return `\n${lines.join('\n')}\n`;
+};
+
+// ------------------------------------------------------------
+// 編集画面かどうかを判定する。
+//   1. URL のハッシュに #edit が含まれる
+//   2. .cm-editor が可視(高さ > 0)
+// ------------------------------------------------------------
+const findEditor = (): HTMLElement | null => document.querySelector<HTMLElement>('.cm-editor');
+const findEditorContent = (): HTMLElement | null => document.querySelector<HTMLElement>('.cm-content');
+
+const isEditing = (): boolean => {
+  const hashEdit = window.location.hash.includes('edit');
+  if (!hashEdit) return false;
+  const ed = findEditor();
+  if (!ed) return false;
+  return ed.getBoundingClientRect().height > 0;
+};
+
+// ------------------------------------------------------------
+// カーソル位置の保存/復元(DOM Selection 方式)。
+// ------------------------------------------------------------
+let savedRange: Range | null = null;
+
+const saveEditorSelection = (): void => {
+  savedRange = null;
+  const content = findEditorContent();
+  if (!content) {
+    console.log('[custom-map-editor] .cm-content なし(保存スキップ)');
+    return;
+  }
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    if (content.contains(range.commonAncestorContainer)) {
+      savedRange = range.cloneRange();
+      console.log('[custom-map-editor] カーソル位置(Range)を保存');
+      return;
+    }
+  }
+  console.log('[custom-map-editor] エディタ内にカーソルなし(末尾へ挿入予定)');
+};
+
+const insertTextAtCursor = (text: string): boolean => {
+  const content = findEditorContent();
+  if (!content) {
+    console.warn('[custom-map-editor] .cm-content が見つかりません');
+    return false;
+  }
+  content.focus();
+
+  if (savedRange) {
+    try {
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+        console.log('[custom-map-editor] カーソル位置(Range)を復元');
+      }
+    } catch (e) {
+      console.warn('[custom-map-editor] Range 復元失敗(現在位置に挿入)', e);
+    }
+  }
+
+  try {
+    const ok = document.execCommand('insertText', false, text);
+    if (ok) {
+      console.log('[custom-map-editor] execCommand insertText で挿入成功');
+      return true;
+    }
+  } catch (e) {
+    console.warn('[custom-map-editor] execCommand 失敗', e);
+  }
+  return false;
+};
+
+const copyToClipboard = async (text: string): Promise<void> => {
+  try {
+    await navigator.clipboard.writeText(text);
+    console.log('[custom-map-editor] クリップボードにコピーしました');
+    showToast('記法をクリップボードにコピーしました。カーソル位置に貼り付けてください。');
+  } catch (e) {
+    console.warn('[custom-map-editor] クリップボードコピー失敗', e);
+  }
+};
+
+const showToast = (message: string): void => {
+  const toast = document.createElement('div');
+  toast.textContent = message;
+  Object.assign(toast.style, {
+    position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
+    background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '10px 16px',
+    borderRadius: '6px', fontSize: '13px', zIndex: '100000',
+    maxWidth: '80vw', textAlign: 'center', pointerEvents: 'none',
+  });
+  document.body.appendChild(toast);
+  window.setTimeout(() => toast.remove(), 3000);
+};
+
+// ============================================================
+// GUI モーダル
+// ============================================================
+const createModalShell = (
+  title: string,
+  closeOnBackdrop = true,
+): { overlay: HTMLElement; card: HTMLElement; body: HTMLElement } => {
+  const old = document.getElementById(MODAL_ID);
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = MODAL_ID;
+  Object.assign(overlay.style, {
+    position: 'fixed', inset: '0', backgroundColor: 'rgba(0,0,0,0.6)',
+    display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: '100000',
+  });
+
+  const card = document.createElement('div');
+  Object.assign(card.style, {
+    position: 'relative', backgroundColor: '#fff', borderRadius: '8px',
+    width: 'min(92vw, 960px)', maxHeight: '88vh', display: 'flex', flexDirection: 'column',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.4)', overflow: 'hidden',
+  });
+  card.addEventListener('click', (e) => e.stopPropagation());
+
+  const header = document.createElement('div');
+  Object.assign(header.style, {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '12px 16px', borderBottom: '1px solid #e5e5e5', flex: '0 0 auto',
+  });
+  const titleEl = document.createElement('div');
+  titleEl.textContent = title;
+  Object.assign(titleEl.style, { fontWeight: 'bold', fontSize: '15px' });
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.innerHTML = '&times;';
+  Object.assign(closeBtn.style, {
+    background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer',
+    lineHeight: '1', color: '#666',
+  });
+  closeBtn.addEventListener('click', () => overlay.remove());
+  header.appendChild(titleEl);
+  header.appendChild(closeBtn);
+
+  const body = document.createElement('div');
+  Object.assign(body.style, { padding: '16px', overflow: 'auto', flex: '1 1 auto' });
+
+  card.appendChild(header);
+  card.appendChild(body);
+  overlay.appendChild(card);
+  if (closeOnBackdrop) {
+    overlay.addEventListener('click', () => overlay.remove());
+  }
+  document.body.appendChild(overlay);
+
+  return { overlay, card, body };
+};
+
+// media-library の画像一覧モーダル
+const openImageListModal = async (): Promise<void> => {
+  const src = getDefaultStockPage();
+  const { body } = createModalShell(`画像を選択（${src}）`);
+
+  const loading = document.createElement('div');
+  loading.textContent = '読み込み中...';
+  Object.assign(loading.style, { color: '#666', padding: '20px', textAlign: 'center' });
+  body.appendChild(loading);
+
+  let attachments: Attachment[] = [];
+  try {
+    attachments = await getAttachmentsForPage(src);
+  } catch (e) {
+    console.error('[custom-map-editor] attachment fetch error', e);
+  }
+  loading.remove();
+
+  const images = attachments.filter((a) => isImageName(attachmentName(a)));
+
+  if (images.length === 0) {
+    const empty = document.createElement('div');
+    empty.textContent = `「${src}」に画像が見つかりませんでした。平面図をこのページに添付してください。`;
+    Object.assign(empty.style, { color: '#666', padding: '20px', textAlign: 'center' });
+    body.appendChild(empty);
+    return;
+  }
+
+  const grid = document.createElement('div');
+  Object.assign(grid.style, {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '12px',
+  });
+
+  for (const att of images) {
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    Object.assign(cell.style, {
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+      border: '1px solid #ddd', borderRadius: '6px', padding: '8px', background: '#fafafa',
+      cursor: 'pointer',
+    });
+
+    const thumb = document.createElement('img');
+    thumb.src = attachmentUrl(att);
+    thumb.alt = attachmentName(att);
+    thumb.loading = 'lazy';
+    Object.assign(thumb.style, {
+      width: '100%', height: '100px', objectFit: 'contain', background: '#fff',
+    });
+
+    const name = document.createElement('div');
+    name.textContent = attachmentName(att);
+    Object.assign(name.style, {
+      fontSize: '12px', color: '#333', wordBreak: 'break-all', textAlign: 'center',
+      lineHeight: '1.3', maxHeight: '2.6em', overflow: 'hidden',
+    });
+
+    cell.appendChild(thumb);
+    cell.appendChild(name);
+    cell.addEventListener('click', () => openMapPreviewModal(att));
+    grid.appendChild(cell);
+  }
+
+  body.appendChild(grid);
+};
+
+// 選んだ平面図にマーカーを配置する編集モーダル。
+const openMapPreviewModal = (att: Attachment): void => {
+  const name = attachmentName(att);
+  const { body } = createModalShell(`地図を作成: ${name}`, false);
+  Object.assign(body.style, { padding: '0' });
+
+  const settings: EditorMapSettings = {
+    file: name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15,
+  };
+  const markers: EditorMarker[] = [];
+  let selected = -1;
+
+  const layout = document.createElement('div');
+  Object.assign(layout.style, { display: 'flex', width: '100%', height: 'min(78vh, 640px)' });
+
+  const left = document.createElement('div');
+  Object.assign(left.style, {
+    flex: '1 1 auto', position: 'relative', background: '#eee', overflow: 'hidden',
+  });
+  const viewport = document.createElement('div');
+  Object.assign(viewport.style, {
+    position: 'absolute', inset: '0', overflow: 'hidden',
+    cursor: 'crosshair', touchAction: 'none',
+  });
+  const stage = document.createElement('div');
+  Object.assign(stage.style, {
+    position: 'absolute', top: '0', left: '0', transformOrigin: '0 0', willChange: 'transform',
+  });
+  const img = document.createElement('img');
+  img.src = attachmentUrl(att);
+  img.alt = name;
+  Object.assign(img.style, { display: 'block', userSelect: 'none', pointerEvents: 'none' });
+  img.draggable = false;
+  stage.appendChild(img);
+  viewport.appendChild(stage);
+  left.appendChild(viewport);
+
+  const hint = document.createElement('div');
+  hint.textContent = 'クリックでマーカー追加 / ホイール・ピンチで拡大 / ドラッグで移動';
+  Object.assign(hint.style, {
+    position: 'absolute', left: '8px', bottom: '8px', background: 'rgba(0,0,0,0.6)',
+    color: '#fff', fontSize: '11px', padding: '4px 8px', borderRadius: '4px', pointerEvents: 'none',
+  });
+  left.appendChild(hint);
+
+  const panel = document.createElement('div');
+  Object.assign(panel.style, {
+    flex: '0 0 300px', borderLeft: '1px solid #e5e5e5', display: 'flex',
+    flexDirection: 'column', overflow: 'auto', padding: '12px', gap: '12px',
+    boxSizing: 'border-box',
+  });
+
+  layout.appendChild(left);
+  layout.appendChild(panel);
+  body.appendChild(layout);
+
+  const view = { scale: 1, tx: 0, ty: 0 };
+  let naturalW = 0;
+  let naturalH = 0;
+  const markerEls: HTMLElement[] = [];
+
+  const applyTransform = (): void => {
+    stage.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`;
+    const inv = view.scale ? 1 / view.scale : 1;
+    for (const el of markerEls) {
+      el.style.transform = `translate(-50%, -50%) scale(${inv})`;
+    }
+  };
+
+  const viewportToPercent = (vx: number, vy: number): { x: number; y: number } => {
+    const ix = (vx - view.tx) / view.scale;
+    const iy = (vy - view.ty) / view.scale;
+    return {
+      x: clamp((ix / naturalW) * 100, 0, 100),
+      y: clamp((iy / naturalH) * 100, 0, 100),
+    };
+  };
+
+  img.addEventListener('load', () => {
+    naturalW = img.naturalWidth;
+    naturalH = img.naturalHeight;
+    stage.style.width = `${naturalW}px`;
+    stage.style.height = `${naturalH}px`;
+    const vpW = viewport.clientWidth;
+    const vpH = viewport.clientHeight;
+    const fit = Math.min(vpW / naturalW, vpH / naturalH);
+    view.scale = fit;
+    view.tx = (vpW - naturalW * fit) / 2;
+    view.ty = (vpH - naturalH * fit) / 2;
+    applyTransform();
+  });
+
+  const renderMarkers = (): void => {
+    stage.querySelectorAll('[data-editor-marker]').forEach((el) => el.remove());
+    markerEls.length = 0;
+
+    markers.forEach((m, i) => {
+      const wrapper = document.createElement('div');
+      wrapper.setAttribute('data-editor-marker', String(i));
+      Object.assign(wrapper.style, {
+        position: 'absolute', left: `${m.x}%`, top: `${m.y}%`, zIndex: '5',
+      });
+      const inner = document.createElement('div');
+      Object.assign(inner.style, {
+        position: 'relative', transformOrigin: 'center center',
+        transform: 'translate(-50%, -50%)',
+      });
+      const pin = document.createElement('div');
+      const isSel = i === selected;
+      Object.assign(pin.style, {
+        width: '14px', height: '14px', backgroundColor: m.color || DEFAULT_MARKER_COLOR,
+        border: isSel ? '3px solid #fff' : '2px solid #fff', borderRadius: '50%',
+        boxShadow: isSel ? '0 0 0 2px #0d6efd, 0 1px 4px rgba(0,0,0,0.5)' : '0 1px 3px rgba(0,0,0,0.5)',
+        cursor: 'pointer',
+      });
+      if (m.label) {
+        const label = document.createElement('div');
+        label.textContent = m.label;
+        Object.assign(label.style, {
+          position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: m.color || DEFAULT_MARKER_COLOR, color: '#fff', padding: '2px 6px',
+          borderRadius: '4px', fontSize: '11px', whiteSpace: 'nowrap', pointerEvents: 'none',
+        });
+        inner.appendChild(label);
+      }
+      inner.appendChild(pin);
+      wrapper.appendChild(inner);
+      wrapper.addEventListener('pointerdown', (e) => e.stopPropagation());
+      wrapper.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectMarker(i);
+      });
+      stage.appendChild(wrapper);
+      markerEls.push(inner);
+    });
+    applyTransform();
+  };
+
+  const renderPanel = (focusLabel = false): void => {
+    panel.innerHTML = '';
+
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.textContent = '← 画像一覧に戻る';
+    Object.assign(back.style, {
+      background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px',
+      padding: '6px 10px', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start',
+    });
+    back.addEventListener('click', () => { openImageListModal(); });
+    panel.appendChild(back);
+
+    panel.appendChild(sectionTitle('地図全体の設定'));
+    panel.appendChild(fieldText('起動ボタンの文言 (link)', settings.link, (v) => { settings.link = v; }));
+    panel.appendChild(fieldNumber('自動復帰(秒) (restore)', settings.restore, (v) => { settings.restore = v; }));
+    panel.appendChild(fieldNumber('初期中心X% (cx)', settings.cx, (v) => { settings.cx = v; }));
+    panel.appendChild(fieldNumber('初期中心Y% (cy)', settings.cy, (v) => { settings.cy = v; }));
+    panel.appendChild(fieldNumber('初期倍率 (scale)', settings.scale, (v) => { settings.scale = v; }));
+
+    panel.appendChild(sectionTitle(`マーカー一覧 (${markers.length})`));
+    if (markers.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = '平面図をクリックしてマーカーを追加';
+      Object.assign(empty.style, { color: '#888', fontSize: '12px' });
+      panel.appendChild(empty);
+    } else {
+      markers.forEach((m, i) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.textContent = `#${i + 1} ${m.label || '(ラベルなし)'}`;
+        Object.assign(row.style, {
+          display: 'block', width: '100%', textAlign: 'left', fontSize: '12px',
+          padding: '6px 8px', marginBottom: '4px', cursor: 'pointer',
+          border: '1px solid ' + (i === selected ? '#0d6efd' : '#ddd'),
+          background: i === selected ? '#e7f1ff' : '#fff', borderRadius: '4px',
+        });
+        row.addEventListener('click', () => selectMarker(i));
+        panel.appendChild(row);
+      });
+    }
+
+    if (selected >= 0 && selected < markers.length) {
+      const m = markers[selected];
+      panel.appendChild(sectionTitle(`選択中: #${selected + 1}`));
+      panel.appendChild(fieldNumber('X (%)', m.x, (v) => { m.x = clamp(v, 0, 100); renderMarkers(); }));
+      panel.appendChild(fieldNumber('Y (%)', m.y, (v) => { m.y = clamp(v, 0, 100); renderMarkers(); }));
+      const labelField = fieldText('ラベル (label)', m.label, (v) => { m.label = v; renderMarkers(); });
+      panel.appendChild(labelField);
+      if (focusLabel) {
+        const labelInput = labelField.querySelector('input');
+        if (labelInput) {
+          window.setTimeout(() => { labelInput.focus(); labelInput.select(); }, 0);
+        }
+      }
+      panel.appendChild(fieldText('参考写真ファイル名 (photo)', m.photo, (v) => { m.photo = v; }));
+      panel.appendChild(fieldColor('色 (color)', m.color, (v) => { m.color = v; renderMarkers(); }));
+      panel.appendChild(fieldText('説明/注意 (desc, | で改行)', m.desc, (v) => { m.desc = v; }));
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = 'このマーカーを削除';
+      Object.assign(del.style, {
+        background: '#dc3545', color: '#fff', border: 'none', borderRadius: '4px',
+        padding: '8px', cursor: 'pointer', fontSize: '13px', marginTop: '6px',
+      });
+      del.addEventListener('click', () => {
+        markers.splice(selected, 1);
+        selected = -1;
+        renderMarkers();
+        renderPanel();
+      });
+      panel.appendChild(del);
+    }
+
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.textContent = '確定して挿入';
+    Object.assign(confirm.style, {
+      marginTop: 'auto', background: '#0d6efd', color: '#fff', border: 'none',
+      borderRadius: '4px', padding: '10px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold',
+    });
+    confirm.addEventListener('click', () => {
+      const snippet = buildCustomMapSnippet(settings, markers);
+      const overlay = document.getElementById(MODAL_ID);
+      if (overlay) overlay.remove();
+      const ok = insertTextAtCursor(snippet);
+      if (ok) {
+        showToast('地図の記法をカーソル位置に挿入しました。');
+      } else {
+        copyToClipboard(snippet);
+      }
+    });
+    panel.appendChild(confirm);
+  };
+
+  const selectMarker = (i: number): void => {
+    selected = i;
+    renderMarkers();
+    renderPanel(true);
+  };
+
+  function sectionTitle(text: string): HTMLElement {
+    const el = document.createElement('div');
+    el.textContent = text;
+    Object.assign(el.style, {
+      fontWeight: 'bold', fontSize: '13px', marginTop: '6px',
+      borderBottom: '1px solid #eee', paddingBottom: '4px',
+    });
+    return el;
+  }
+  function fieldWrap(labelText: string, input: HTMLElement): HTMLElement {
+    const wrap = document.createElement('label');
+    Object.assign(wrap.style, { display: 'block', fontSize: '12px', color: '#333' });
+    const lab = document.createElement('div');
+    lab.textContent = labelText;
+    Object.assign(lab.style, { marginBottom: '2px' });
+    wrap.appendChild(lab);
+    wrap.appendChild(input);
+    return wrap;
+  }
+  function fieldText(labelText: string, value: string, onChange: (v: string) => void): HTMLElement {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = value;
+    Object.assign(input.style, { width: '100%', padding: '4px 6px', boxSizing: 'border-box', fontSize: '12px' });
+    input.addEventListener('input', () => onChange(input.value));
+    return fieldWrap(labelText, input);
+  }
+  function fieldNumber(labelText: string, value: number, onChange: (v: number) => void): HTMLElement {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.value = String(value);
+    input.step = 'any';
+    Object.assign(input.style, { width: '100%', padding: '4px 6px', boxSizing: 'border-box', fontSize: '12px' });
+    input.addEventListener('input', () => {
+      const v = Number(input.value);
+      if (Number.isFinite(v)) onChange(v);
+    });
+    return fieldWrap(labelText, input);
+  }
+  function fieldColor(labelText: string, value: string, onChange: (v: string) => void): HTMLElement {
+    const container = document.createElement('div');
+    const grid = document.createElement('div');
+    Object.assign(grid.style, {
+      display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '6px',
+    });
+    const codeInput = document.createElement('input');
+    codeInput.type = 'text';
+    codeInput.value = value || DEFAULT_MARKER_COLOR;
+    Object.assign(codeInput.style, {
+      width: '100%', padding: '4px 6px', boxSizing: 'border-box',
+      fontSize: '12px', fontFamily: 'monospace',
+    });
+    const swatchEls: { color: string; el: HTMLElement }[] = [];
+    const refreshSelection = (current: string): void => {
+      const cur = (current || '').toLowerCase();
+      for (const s of swatchEls) {
+        const isSel = s.color.toLowerCase() === cur;
+        s.el.style.border = isSel ? '2px solid #0d6efd' : '2px solid transparent';
+        s.el.style.padding = '2px';
+      }
+    };
+    const setColor = (c: string): void => {
+      codeInput.value = c;
+      refreshSelection(c);
+      onChange(c);
+    };
+    for (const c of PRESET_COLORS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.title = c;
+      Object.assign(btn.style, {
+        boxSizing: 'border-box', border: '2px solid transparent', padding: '2px',
+        borderRadius: '5px', background: 'transparent', cursor: 'pointer', lineHeight: '0',
+      });
+      const block = document.createElement('span');
+      Object.assign(block.style, {
+        display: 'block', width: '20px', height: '20px', borderRadius: '3px',
+        background: c, border: '1px solid #999',
+      });
+      btn.appendChild(block);
+      btn.addEventListener('click', () => setColor(c));
+      grid.appendChild(btn);
+      swatchEls.push({ color: c, el: btn });
+    }
+    codeInput.addEventListener('input', () => {
+      refreshSelection(codeInput.value);
+      onChange(codeInput.value);
+    });
+    refreshSelection(codeInput.value);
+    container.appendChild(grid);
+    container.appendChild(codeInput);
+    return fieldWrap(labelText, container);
+  }
+
+  // ---- ズーム/パン + クリックでマーカー配置 ----
+  const pointers = new Map<number, { x: number; y: number }>();
+  let panStartTx = 0; let panStartTy = 0; let panStartX = 0; let panStartY = 0;
+  let pinchStartDist = 0; let pinchStartScale = 1; let pinchStartTx = 0; let pinchStartTy = 0;
+  let pinchCenter = { x: 0, y: 0 };
+  let downPos = { x: 0, y: 0 };
+  let moved = false;
+  const MOVE_THRESHOLD = 5;
+
+  const vpPoint = (clientX: number, clientY: number): { x: number; y: number } => {
+    const r = viewport.getBoundingClientRect();
+    return { x: clientX - r.left, y: clientY - r.top };
+  };
+
+  viewport.addEventListener('pointerdown', (e: PointerEvent) => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { viewport.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    if (pointers.size === 1) {
+      panStartX = e.clientX; panStartY = e.clientY;
+      panStartTx = view.tx; panStartTy = view.ty;
+      downPos = { x: e.clientX, y: e.clientY };
+      moved = false;
+    } else if (pointers.size === 2) {
+      const [a, b] = Array.from(pointers.values());
+      pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      pinchStartScale = view.scale; pinchStartTx = view.tx; pinchStartTy = view.ty;
+      pinchCenter = vpPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
+      moved = true;
+    }
+  });
+
+  viewport.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size >= 2) {
+      const [a, b] = Array.from(pointers.values());
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const newScale = clamp(pinchStartScale * (dist / pinchStartDist), 0.05, 40);
+      const ratio = newScale / pinchStartScale;
+      view.tx = pinchCenter.x - (pinchCenter.x - pinchStartTx) * ratio;
+      view.ty = pinchCenter.y - (pinchCenter.y - pinchStartTy) * ratio;
+      view.scale = newScale;
+      applyTransform();
+    } else if (pointers.size === 1) {
+      const dx = e.clientX - panStartX;
+      const dy = e.clientY - panStartY;
+      if (Math.abs(e.clientX - downPos.x) > MOVE_THRESHOLD || Math.abs(e.clientY - downPos.y) > MOVE_THRESHOLD) {
+        moved = true;
+      }
+      view.tx = panStartTx + dx;
+      view.ty = panStartTy + dy;
+      applyTransform();
+    }
+  });
+
+  const endPointer = (e: PointerEvent): void => {
+    if (!pointers.has(e.pointerId)) return;
+    const wasSingle = pointers.size === 1;
+    pointers.delete(e.pointerId);
+    try { viewport.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    if (wasSingle && !moved) {
+      const p = vpPoint(e.clientX, e.clientY);
+      const pos = viewportToPercent(p.x, p.y);
+      markers.push({
+        x: round1(pos.x), y: round1(pos.y), label: '', photo: '',
+        color: DEFAULT_MARKER_COLOR, desc: '',
+      });
+      selected = markers.length - 1;
+      renderMarkers();
+      renderPanel(true);
+    }
+    if (pointers.size === 1) {
+      const [p] = Array.from(pointers.values());
+      panStartX = p.x; panStartY = p.y; panStartTx = view.tx; panStartTy = view.ty;
+    }
+  };
+  viewport.addEventListener('pointerup', endPointer);
+  viewport.addEventListener('pointercancel', endPointer);
+
+  viewport.addEventListener('wheel', (e: WheelEvent) => {
+    e.preventDefault();
+    const p = vpPoint(e.clientX, e.clientY);
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const newScale = clamp(view.scale * factor, 0.05, 40);
+    const ratio = newScale / view.scale;
+    view.tx = p.x - (p.x - view.tx) * ratio;
+    view.ty = p.y - (p.y - view.ty) * ratio;
+    view.scale = newScale;
+    applyTransform();
+  }, { passive: false });
+
+  renderPanel();
+  renderMarkers();
+};
+
+// ------------------------------------------------------------
+// フローティングボタン
+// ------------------------------------------------------------
+const ensureFab = (): void => {
+  const editing = isEditing();
+  const existing = document.getElementById(BTN_ID);
+
+  if (!editing) {
+    if (existing) existing.remove();
+    return;
+  }
+  if (existing) return;
+
+  const fab = document.createElement('button');
+  fab.id = BTN_ID;
+  fab.type = 'button';
+  fab.textContent = '🗺 地図を作成';
+  Object.assign(fab.style, {
+    position: 'fixed', right: '24px', bottom: '76px', zIndex: '99999',
+    background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '24px',
+    padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
+  });
+
+  fab.addEventListener('click', (e) => {
+    e.preventDefault();
+    saveEditorSelection();
+    openImageListModal().catch((err) => console.error('[custom-map-editor] failed to open modal', err));
+  });
+
+  document.body.appendChild(fab);
+};
+
+// ------------------------------------------------------------
+// activate / deactivate
+// ------------------------------------------------------------
+let observer: MutationObserver | undefined;
+let intervalId: number | undefined;
+let onHashChange: (() => void) | undefined;
+
+export const activateEditor = (): void => {
+  onHashChange = () => ensureFab();
+  window.addEventListener('hashchange', onHashChange);
+  try {
+    observer = new MutationObserver(() => ensureFab());
+    observer.observe(document.body, { childList: true, subtree: true });
+  } catch (e) {
+    console.warn('[custom-map-editor] MutationObserver 未対応', e);
+  }
+  intervalId = window.setInterval(ensureFab, 1000);
+  ensureFab();
+  console.log('[custom-map-editor] activated');
+};
+
+export const deactivateEditor = (): void => {
+  if (onHashChange) { window.removeEventListener('hashchange', onHashChange); onHashChange = undefined; }
+  if (observer) { observer.disconnect(); observer = undefined; }
+  if (intervalId) { window.clearInterval(intervalId); intervalId = undefined; }
+  const existing = document.getElementById(BTN_ID);
+  if (existing) existing.remove();
+};

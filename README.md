@@ -165,7 +165,11 @@ npm install
 npm run build
 ```
 
-- ソースはリポジトリ直下の `client-entry.tsx`（Vite の manifest キーを GROWI の期待に合わせるため直下に配置）
+- エントリはリポジトリ直下の `client-entry.tsx`（Vite の manifest キーを GROWI の期待に合わせるため直下に配置）。実装は `src/` に分割
+  - `src/common.ts`: 表示・編集で共有するユーティリティ（添付解決、設定読み取り等）
+  - `src/viewer.ts`: 表示機能（記法 → 地図モーダル）。`activateViewer`
+  - `src/editor.ts`: GUI 編集機能（編集画面のフローティングボタン → 平面図にマーカー配置 → 記法生成・カーソル挿入）。`activateEditor`
+  - `client-entry.tsx` は両者を**独立した try-catch で起動**し、片方が壊れても他方に影響しない（リスク分離）
 - ビルドには [Vite](https://vitejs.dev/) を使用します（`vite build`、公式スクリプトプラグインと同じ構成）
 - ビルド成果物は `dist/` に出力されます
   - `dist/assets/client-entry-*.js`: バンドルされたプラグイン本体
@@ -178,7 +182,11 @@ npm run build
 
 ```
 .
-├── client-entry.tsx       # プラグイン本体（directive 変換 + モーダル UI）
+├── client-entry.tsx       # エントリ（viewer と editor を独立 try-catch で起動）
+├── src/
+│   ├── common.ts          # 共通ユーティリティ
+│   ├── viewer.ts          # 表示機能（directive 変換 + 地図モーダル）
+│   └── editor.ts          # GUI 編集機能（フローティングボタン + マーカー配置 UI）
 ├── dist/                  # ビルド成果物（コミット対象）
 │   ├── assets/
 │   │   └── client-entry-*.js

@@ -1,11 +1,13 @@
 import { activateViewer, deactivateViewer } from './src/viewer';
+import { activateEditor, deactivateEditor } from './src/editor';
 
 // ============================================================
 // growi-plugin-custom-map エントリポイント
 //
-// 表示(viewer)機能を起動する。編集(editor)機能は次段で追加する。
+// 表示(viewer)機能と 編集(editor)機能を起動する。
 // 各機能は独立した try-catch で起動し、片方が失敗しても他方に影響しない
-// ようにする(リスク分離)。
+// ようにする(リスク分離)。例えば編集機能はエディタ DOM に依存するため
+// GROWI のアップデートで壊れる可能性があるが、その場合でも表示機能は動く。
 // ============================================================
 
 export const activate = (): void => {
@@ -14,6 +16,11 @@ export const activate = (): void => {
   } catch (e) {
     console.error('[custom-map] viewer activate failed', e);
   }
+  try {
+    activateEditor();
+  } catch (e) {
+    console.error('[custom-map] editor activate failed', e);
+  }
 };
 
 export const deactivate = (): void => {
@@ -21,6 +28,11 @@ export const deactivate = (): void => {
     deactivateViewer();
   } catch (e) {
     console.error('[custom-map] viewer deactivate failed', e);
+  }
+  try {
+    deactivateEditor();
+  } catch (e) {
+    console.error('[custom-map] editor deactivate failed', e);
   }
 };
 
