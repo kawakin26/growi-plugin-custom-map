@@ -364,9 +364,17 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
   const view = { scale: mapData.scale || 1, tx: 0, ty: 0 };
   let naturalW = 0;
   let naturalH = 0;
+  // 逆スケール対象のマーカー inner 群(マーカー生成時に push する)。
+  const markerInners: HTMLElement[] = [];
 
   const applyTransform = (): void => {
     stage.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`;
+    // マーカー/ラベルは stage の拡大に追従させず、常に一定サイズで見せる。
+    // stage の scale を打ち消す逆スケールを各 inner に適用する。
+    const inv = view.scale ? 1 / view.scale : 1;
+    for (const inner of markerInners) {
+      inner.style.transform = `translate(-50%, -50%) scale(${inv})`;
+    }
   };
 
   // 画像ロード後に、指定された中心座標が窓の中央に来るよう初期化
@@ -394,8 +402,10 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
   });
 
   // ─── マーカー生成 ───
+  // 逆スケール対象の inner を集め、applyTransform で一括更新する。
   mapData.markers.forEach((marker) => {
-    createMarker(stage, marker, mapData);
+    const inner = createMarker(stage, marker, mapData);
+    markerInners.push(inner);
   });
 
   // ─── ドラッグでパン ───
@@ -466,26 +476,42 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
 //   左クリック/タップ  : 最小化・再表示のトグル
 //   右クリック/ロングタップ : 参照写真のポップアップ
 // ==========================================
-const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData): void => {
+const createMarker = (
+  stage: HTMLElement,
+  marker: MarkerData,
+  mapData: MapData,
+): HTMLElement => {
   const color = marker.color || '#ff3b30';
   const restoreSec = mapData.restore;
 
-  // マーカーのラッパー（画像座標系に対して % で配置）
+  // マーカーのラッパー（画像座標系に対して % で配置）。
+  // ここは位置決めのみ担当し、拡大縮小の逆補正は内側 inner で行う。
   const wrapper = document.createElement('div');
   wrapper.setAttribute('data-map-marker', 'true');
   Object.assign(wrapper.style, {
-    position: 'absolute', left: `${marker.x}%`, top: `${marker.y}%`,
-    transform: 'translate(-50%, -50%)', zIndex: '5',
+    position: 'absolute', left: `${marker.x}%`, top: `${marker.y}%`, zIndex: '5',
+  });
+
+  // ─── 逆スケール用インナー ───
+  // stage 全体に scale(view.scale) がかかるため、マーカー/ラベルを常に一定サイズで
+  // 見せるには inner に scale(1/view.scale) を掛けて相殺する。
+  // 中心合わせ(translate(-50%,-50%))も inner 側で行い、原点をマーカー位置に保つ。
+  const inner = document.createElement('div');
+  inner.setAttribute('data-marker-inner', 'true');
+  Object.assign(inner.style, {
+    position: 'relative',
+    transformOrigin: 'center center',
+    transform: 'translate(-50%, -50%)',
   });
 
   const hasDesc = !!(marker.desc && marker.desc.trim());
 
-  // ─── ピン本体 ───
+  // ─── ピン本体 ─── (初期サイズは従来の 1/3: 18px → 6px)
   const pin = document.createElement('div');
   Object.assign(pin.style, {
-    position: 'relative', width: '18px', height: '18px', backgroundColor: color,
-    border: '2px solid #fff', borderRadius: '50%',
-    boxShadow: '0 2px 5px rgba(0,0,0,0.4)', cursor: 'pointer',
+    position: 'relative', width: '6px', height: '6px', backgroundColor: color,
+    border: '1px solid #fff', borderRadius: '50%',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.4)', cursor: 'pointer',
     transition: 'width 0.15s ease, height 0.15s ease, opacity 0.15s ease',
   });
   // 説明文/注意書きがあるマーカーは点滅させて存在を示す
@@ -494,11 +520,11 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
     pin.classList.add('growi-custom-map-pin-blink');
   }
 
-  // ─── ラベル ───
+  // ─── ラベル ─── (ピン縮小に合わせてオフセットを詰める)
   const labelEl = document.createElement('div');
   labelEl.innerText = marker.label || '';
   Object.assign(labelEl.style, {
-    position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+    position: 'absolute', bottom: '10px', left: '50%', transform: 'translateX(-50%)',
     backgroundColor: color, color: '#fff', padding: '4px 8px', borderRadius: '4px',
     fontSize: '12px', whiteSpace: 'nowrap', boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
     cursor: 'pointer', userSelect: 'none', transition: 'opacity 0.15s ease',
@@ -512,7 +538,7 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
     minimized = true;
     // ピンを小さな点に(点滅は止めて控えめに)
     if (hasDesc) pin.classList.remove('growi-custom-map-pin-blink');
-    Object.assign(pin.style, { width: '6px', height: '6px', borderWidth: '1px', opacity: '0.6' });
+    Object.assign(pin.style, { width: '2px', height: '2px', borderWidth: '1px', opacity: '0.6' });
     if (marker.label) labelEl.style.display = 'none';
 
     // 指定秒後に自動復帰
@@ -522,7 +548,7 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
 
   const restore = (): void => {
     minimized = false;
-    Object.assign(pin.style, { width: '18px', height: '18px', borderWidth: '2px', opacity: '1' });
+    Object.assign(pin.style, { width: '6px', height: '6px', borderWidth: '1px', opacity: '1' });
     // 説明文付きなら点滅を再開
     if (hasDesc) pin.classList.add('growi-custom-map-pin-blink');
     if (marker.label) labelEl.style.display = '';
@@ -622,11 +648,15 @@ const createMarker = (stage: HTMLElement, marker: MarkerData, mapData: MapData):
 
   if (marker.label) {
     attachInteractions(labelEl);
-    wrapper.appendChild(labelEl);
+    inner.appendChild(labelEl);
   }
 
-  wrapper.appendChild(pin);
+  inner.appendChild(pin);
+  wrapper.appendChild(inner);
   stage.appendChild(wrapper);
+
+  // 逆スケール更新用に inner を返す(呼び出し側が view.scale に応じて更新する)。
+  return inner;
 };
 
 // ==========================================
