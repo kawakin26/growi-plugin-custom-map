@@ -567,12 +567,12 @@ const createMarker = (
 
   const hasDesc = !!(marker.desc && marker.desc.trim());
 
-  // ─── ピン本体 ─── (初期サイズは従来の 1/3: 18px → 6px)
+  // ─── ピン本体 ─── (タップしやすいサイズ 12px。ラベルサイズは変えない)
   const pin = document.createElement('div');
   Object.assign(pin.style, {
-    position: 'relative', width: '6px', height: '6px', backgroundColor: color,
-    border: '1px solid #fff', borderRadius: '50%',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.4)', cursor: 'pointer',
+    position: 'relative', width: '12px', height: '12px', backgroundColor: color,
+    border: '2px solid #fff', borderRadius: '50%',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.4)', cursor: 'pointer',
     transition: 'width 0.15s ease, height 0.15s ease, opacity 0.15s ease',
   });
   // 説明文/注意書きがあるマーカーは点滅させて存在を示す
@@ -585,7 +585,7 @@ const createMarker = (
   const labelEl = document.createElement('div');
   labelEl.innerText = marker.label || '';
   Object.assign(labelEl.style, {
-    position: 'absolute', bottom: '10px', left: '50%', transform: 'translateX(-50%)',
+    position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
     backgroundColor: color, color: '#fff', padding: '4px 8px', borderRadius: '4px',
     fontSize: '12px', whiteSpace: 'nowrap', boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
     cursor: 'pointer', userSelect: 'none', transition: 'opacity 0.15s ease',
@@ -601,7 +601,7 @@ const createMarker = (
     // 「隠れている状態」を示す(点で消えて再クリックできなくなるのを防ぐ)。
     ensureBlinkStyle();
     pin.classList.add('growi-custom-map-pin-blink');
-    Object.assign(pin.style, { width: '6px', height: '6px', borderWidth: '1px', opacity: '1' });
+    Object.assign(pin.style, { width: '12px', height: '12px', borderWidth: '2px', opacity: '1' });
     if (marker.label) labelEl.style.display = 'none';
 
     // 指定秒後に自動復帰
@@ -611,7 +611,7 @@ const createMarker = (
 
   const restore = (): void => {
     minimized = false;
-    Object.assign(pin.style, { width: '6px', height: '6px', borderWidth: '1px', opacity: '1' });
+    Object.assign(pin.style, { width: '12px', height: '12px', borderWidth: '2px', opacity: '1' });
     // 通常表示に戻す。点滅は説明文付きマーカーのみ(元の仕様)。
     if (hasDesc) pin.classList.add('growi-custom-map-pin-blink');
     else pin.classList.remove('growi-custom-map-pin-blink');
