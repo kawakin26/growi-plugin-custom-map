@@ -62,9 +62,16 @@ interface MapData {
   cy: number;
   scale: number;
   restore: number;
+  rotate: number;
   markers: MarkerData[];
   currentPagePath: string;
 }
+
+// 回転角を 0/90/180/270 のいずれかに正規化する(負値や 360 超も丸める)。
+const normalizeRotate = (deg: number): number => {
+  const n = ((Math.round(deg / 90) * 90) % 360 + 360) % 360;
+  return n;
+};
 
 // 拡張子から CAD ファイルかどうかを判定する
 const CAD_EXTENSIONS = ['.dxf', '.jww'];
@@ -225,16 +232,34 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
   img.draggable = false;
   stage.appendChild(img);
 
+  const rotate = mapData.rotate || 0;
+  const rad = (rotate * Math.PI) / 180;
+  const cosR = Math.cos(rad);
+  const sinR = Math.sin(rad);
+
+  // 元画像座標(px,py)を rotate + scale した後の相対オフセットを返す。
+  // transform は translate(tx,ty) rotate(rot) scale(s) の順で適用される前提。
+  const rotScale = (px: number, py: number, s: number): { x: number; y: number } => {
+    const sx = px * s;
+    const sy = py * s;
+    return {
+      x: sx * cosR - sy * sinR,
+      y: sx * sinR + sy * cosR,
+    };
+  };
+
   const view = { scale: mapData.scale || 1, tx: 0, ty: 0 };
   let naturalW = 0;
   let naturalH = 0;
   const markerInners: HTMLElement[] = [];
 
   const applyTransform = (): void => {
-    stage.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`;
+    stage.style.transform = `translate(${view.tx}px, ${view.ty}px) rotate(${rotate}deg) scale(${view.scale})`;
+    // マーカーの中身は回転を打ち消して常に正立させる。stage の rotate を相殺するため
+    // rotate(-rot) を掛け、さらに拡大の逆数でサイズを一定に保つ。
     const inv = view.scale ? 1 / view.scale : 1;
     for (const inner of markerInners) {
-      inner.style.transform = `translate(-50%, -50%) scale(${inv})`;
+      inner.style.transform = `translate(-50%, -50%) rotate(${-rotate}deg) scale(${inv})`;
     }
   };
 
@@ -247,14 +272,20 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
     const vpW = viewport.clientWidth;
     const vpH = viewport.clientHeight;
 
-    const fitScale = Math.min(vpW / naturalW, vpH / naturalH);
+    // 90/270 度回転では見かけの幅・高さが入れ替わるので、それを考慮して fit を計算。
+    const swap = rotate === 90 || rotate === 270;
+    const dispW = swap ? naturalH : naturalW;
+    const dispH = swap ? naturalW : naturalH;
+    const fitScale = Math.min(vpW / dispW, vpH / dispH);
     const baseScale = fitScale * (mapData.scale || 1);
     view.scale = baseScale;
 
+    // 元画像上の中心点を、回転・スケール後に viewport 中央へ合わせる。
     const centerX = (mapData.cx / 100) * naturalW;
     const centerY = (mapData.cy / 100) * naturalH;
-    view.tx = vpW / 2 - centerX * view.scale;
-    view.ty = vpH / 2 - centerY * view.scale;
+    const off = rotScale(centerX, centerY, view.scale);
+    view.tx = vpW / 2 - off.x;
+    view.ty = vpH / 2 - off.y;
 
     applyTransform();
   });
@@ -656,6 +687,7 @@ const buildMapData = (node: any): MapData => {
     cy: toNumber(attributes.cy, 50),
     scale: toNumber(attributes.scale, 1),
     restore: toNumber(attributes.restore, 15),
+    rotate: normalizeRotate(toNumber(attributes.rotate, 0)),
     markers,
     currentPagePath: '',
   };

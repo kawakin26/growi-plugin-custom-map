@@ -46,7 +46,11 @@ interface EditorMapSettings {
   scale: number;
   link: string;
   restore: number;
+  rotate: number;
 }
+
+// 回転角を 0/90/180/270 のいずれかに正規化する。
+const normalizeRotate = (deg: number): number => (((Math.round(deg / 90) * 90) % 360) + 360) % 360;
 
 const DEFAULT_MARKER_COLOR = '#ff3b30';
 
@@ -68,6 +72,7 @@ const buildCustomMapSnippet = (settings: EditorMapSettings, markers: EditorMarke
   if (settings.cx !== 50) attrs.push(`cx="${round1(settings.cx)}"`);
   if (settings.cy !== 50) attrs.push(`cy="${round1(settings.cy)}"`);
   if (settings.scale !== 1) attrs.push(`scale="${settings.scale}"`);
+  if (settings.rotate) attrs.push(`rotate="${normalizeRotate(settings.rotate)}"`);
   if (settings.link && settings.link !== 'マップを開く') attrs.push(attrStr('link', settings.link));
   if (settings.restore !== 15) attrs.push(`restore="${settings.restore}"`);
 
@@ -314,7 +319,7 @@ const openMapPreviewModal = (att: Attachment): void => {
   Object.assign(body.style, { padding: '0' });
 
   const settings: EditorMapSettings = {
-    file: name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15,
+    file: name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
   };
   const markers: EditorMarker[] = [];
   let selected = -1;
@@ -368,21 +373,59 @@ const openMapPreviewModal = (att: Attachment): void => {
   let naturalH = 0;
   const markerEls: HTMLElement[] = [];
 
+  // 現在の回転角(deg)から cos/sin を得る。settings.rotate は回転UIで変わる。
+  const rotRad = (): number => (settings.rotate * Math.PI) / 180;
+
+  // 元画像座標(px,py)を rotate + scale した後の相対オフセット。
+  const rotScale = (px: number, py: number, s: number): { x: number; y: number } => {
+    const r = rotRad();
+    const cosR = Math.cos(r);
+    const sinR = Math.sin(r);
+    const sx = px * s;
+    const sy = py * s;
+    return { x: sx * cosR - sy * sinR, y: sx * sinR + sy * cosR };
+  };
+
   const applyTransform = (): void => {
-    stage.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`;
+    stage.style.transform = `translate(${view.tx}px, ${view.ty}px) rotate(${settings.rotate}deg) scale(${view.scale})`;
     const inv = view.scale ? 1 / view.scale : 1;
     for (const el of markerEls) {
-      el.style.transform = `translate(-50%, -50%) scale(${inv})`;
+      el.style.transform = `translate(-50%, -50%) rotate(${-settings.rotate}deg) scale(${inv})`;
     }
   };
 
+  // viewport 上のクリック点を、回転を打ち消して元画像基準の % に変換する。
+  // 画面点 (vx,vy) から中心オフセットを引き、逆回転してからスケールで割る。
   const viewportToPercent = (vx: number, vy: number): { x: number; y: number } => {
-    const ix = (vx - view.tx) / view.scale;
-    const iy = (vy - view.ty) / view.scale;
+    const ox = vx - view.tx;
+    const oy = vy - view.ty;
+    const r = rotRad();
+    const cosR = Math.cos(r);
+    const sinR = Math.sin(r);
+    // 逆回転(R(-rot)) を掛けてからスケールで割る。
+    const ix = (ox * cosR + oy * sinR) / view.scale;
+    const iy = (-ox * sinR + oy * cosR) / view.scale;
     return {
       x: clamp((ix / naturalW) * 100, 0, 100),
       y: clamp((iy / naturalH) * 100, 0, 100),
     };
+  };
+
+  // viewport にフィットするよう scale と tx/ty を再計算する(回転変更時にも呼ぶ)。
+  const fitToViewport = (): void => {
+    if (!naturalW || !naturalH) return;
+    const vpW = viewport.clientWidth;
+    const vpH = viewport.clientHeight;
+    const swap = settings.rotate === 90 || settings.rotate === 270;
+    const dispW = swap ? naturalH : naturalW;
+    const dispH = swap ? naturalW : naturalH;
+    const fit = Math.min(vpW / dispW, vpH / dispH);
+    view.scale = fit;
+    // 元画像中心を viewport 中央に合わせる。
+    const off = rotScale(naturalW / 2, naturalH / 2, view.scale);
+    view.tx = vpW / 2 - off.x;
+    view.ty = vpH / 2 - off.y;
+    applyTransform();
   };
 
   img.addEventListener('load', () => {
@@ -390,13 +433,7 @@ const openMapPreviewModal = (att: Attachment): void => {
     naturalH = img.naturalHeight;
     stage.style.width = `${naturalW}px`;
     stage.style.height = `${naturalH}px`;
-    const vpW = viewport.clientWidth;
-    const vpH = viewport.clientHeight;
-    const fit = Math.min(vpW / naturalW, vpH / naturalH);
-    view.scale = fit;
-    view.tx = (vpW - naturalW * fit) / 2;
-    view.ty = (vpH - naturalH * fit) / 2;
-    applyTransform();
+    fitToViewport();
   });
 
   const renderMarkers = (): void => {
@@ -465,6 +502,12 @@ const openMapPreviewModal = (att: Attachment): void => {
     panel.appendChild(fieldNumber('初期中心X% (cx)', settings.cx, (v) => { settings.cx = v; }));
     panel.appendChild(fieldNumber('初期中心Y% (cy)', settings.cy, (v) => { settings.cy = v; }));
     panel.appendChild(fieldNumber('初期倍率 (scale)', settings.scale, (v) => { settings.scale = v; }));
+    panel.appendChild(fieldRotate('回転 (rotate)', settings.rotate, (v) => {
+      settings.rotate = normalizeRotate(v);
+      fitToViewport();
+      renderMarkers();
+      renderPanel();
+    }));
 
     panel.appendChild(sectionTitle(`マーカー一覧 (${markers.length})`));
     if (markers.length === 0) {
@@ -586,6 +629,38 @@ const openMapPreviewModal = (att: Attachment): void => {
       if (Number.isFinite(v)) onChange(v);
     });
     return fieldWrap(labelText, input);
+  }
+  function fieldRotate(labelText: string, value: number, onChange: (v: number) => void): HTMLElement {
+    const container = document.createElement('div');
+    const grid = document.createElement('div');
+    Object.assign(grid.style, { display: 'flex', gap: '6px' });
+    const options = [0, 90, 180, 270];
+    const btns: { deg: number; el: HTMLButtonElement }[] = [];
+    const refresh = (cur: number): void => {
+      for (const b of btns) {
+        const isSel = b.deg === cur;
+        Object.assign(b.el.style, {
+          background: isSel ? '#0d6efd' : '#fff',
+          color: isSel ? '#fff' : '#333',
+          borderColor: isSel ? '#0d6efd' : '#ccc',
+        });
+      }
+    };
+    for (const deg of options) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = `${deg}°`;
+      Object.assign(btn.style, {
+        flex: '1 1 0', padding: '5px 0', fontSize: '12px', cursor: 'pointer',
+        border: '1px solid #ccc', borderRadius: '4px', background: '#fff',
+      });
+      btn.addEventListener('click', () => { refresh(deg); onChange(deg); });
+      grid.appendChild(btn);
+      btns.push({ deg, el: btn });
+    }
+    refresh(normalizeRotate(value));
+    container.appendChild(grid);
+    return fieldWrap(labelText, container);
   }
   function fieldColor(labelText: string, value: string, onChange: (v: string) => void): HTMLElement {
     const container = document.createElement('div');
