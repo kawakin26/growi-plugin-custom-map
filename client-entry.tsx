@@ -1,5 +1,6 @@
 import { activateViewer, deactivateViewer } from './src/viewer';
 import { activateEditor, deactivateEditor } from './src/editor';
+import { activateRegister, deactivateRegister } from './src/register';
 
 // ============================================================
 // growi-plugin-custom-map エントリポイント
@@ -21,6 +22,11 @@ export const activate = (): void => {
   } catch (e) {
     console.error('[custom-map] editor activate failed', e);
   }
+  try {
+    activateRegister();
+  } catch (e) {
+    console.error('[custom-map] register activate failed', e);
+  }
 };
 
 export const deactivate = (): void => {
@@ -33,6 +39,11 @@ export const deactivate = (): void => {
     deactivateEditor();
   } catch (e) {
     console.error('[custom-map] editor deactivate failed', e);
+  }
+  try {
+    deactivateRegister();
+  } catch (e) {
+    console.error('[custom-map] register deactivate failed', e);
   }
 };
 

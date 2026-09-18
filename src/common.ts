@@ -21,6 +21,99 @@ export const getCadConvertApi = (): string => {
   return v;
 };
 
+// ============================================================
+// アセット登録 API(方式Q)クライアント。
+// cadConvertApi は変換エンドポイント(/convert)を指すので、その末尾を /assets に
+// 置き換えてアセット管理エンドポイントの URL を組み立てる。
+// ============================================================
+
+// 変換 API のベースから /assets エンドポイントの URL を導出する。
+// 例: https://gw/cad/convert -> https://gw/cad/assets
+const getAssetsApiBase = (): string => {
+  const api = getCadConvertApi();
+  if (!api) return '';
+  // 末尾の /convert(クエリ以降は無視)を /assets に置換。
+  const [path] = api.split('?');
+  if (/\/convert$/.test(path)) return path.replace(/\/convert$/, '/assets');
+  // /convert で終わっていない場合は、末尾に /assets を足す(フォールバック)。
+  return `${path.replace(/\/$/, '')}/assets`;
+};
+
+// 登録アセット1件
+export interface RegisteredAsset {
+  name: string;
+  key: string;
+  type: string;
+  srcFile: string;
+  src: string;
+  rotate: number;
+  createdAt: string;
+  imageUrl: string;
+}
+
+// 未登録の CAD ファイル名一覧を取得する(新規登録タブ用)。
+export const fetchUnregisteredCads = async (src: string): Promise<string[]> => {
+  const base = getAssetsApiBase();
+  if (!base) throw new Error('cadConvertApi is not configured');
+  const url = `${base}/unregistered?src=${encodeURIComponent(src)}`;
+  const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`fetch unregistered failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data?.files) ? (data.files as string[]) : [];
+};
+
+// 登録済みアセット一覧を取得する(削除タブ用)。src 省略で全件。
+export const fetchRegisteredAssets = async (src?: string): Promise<RegisteredAsset[]> => {
+  const base = getAssetsApiBase();
+  if (!base) throw new Error('cadConvertApi is not configured');
+  const url = src ? `${base}?src=${encodeURIComponent(src)}` : base;
+  const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`fetch assets failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data?.assets) ? (data.assets as RegisteredAsset[]) : [];
+};
+
+// CAD を別名で登録する。成功時は登録結果(imageUrl 等)を返す。
+export const registerCadAsset = async (params: {
+  name: string; file: string; src: string; rotate: number;
+}): Promise<{ imageUrl: string; name: string; rotate: number }> => {
+  const base = getAssetsApiBase();
+  if (!base) throw new Error('cadConvertApi is not configured');
+  const res = await fetch(base, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = (data && (data as Record<string, unknown>).message) || `register failed: ${res.status}`;
+    throw new Error(String(msg));
+  }
+  return data as { imageUrl: string; name: string; rotate: number };
+};
+
+// 登録アセットを削除する。
+export const deleteCadAsset = async (name: string): Promise<void> => {
+  const base = getAssetsApiBase();
+  if (!base) throw new Error('cadConvertApi is not configured');
+  const url = `${base}?name=${encodeURIComponent(name)}`;
+  const res = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const msg = (data && (data as Record<string, unknown>).message) || `delete failed: ${res.status}`;
+    throw new Error(String(msg));
+  }
+};
+
+// 変換 API のプレビュー用 URL を組み立てる(登録前に回転結果を確認する)。
+// 方式1(file+src+rotate)で /convert を呼ぶ URL を返す。
+export const buildConvertPreviewUrl = (file: string, src: string, rotate: number): string => {
+  const api = getCadConvertApi();
+  if (!api) return '';
+  const sep = api.includes('?') ? '&' : '?';
+  return `${api}${sep}file=${encodeURIComponent(file)}&src=${encodeURIComponent(src)}&rotate=${rotate}`;
+};
+
 // 添付ファイル(必要な項目のみ)
 export interface Attachment {
   _id: string;
