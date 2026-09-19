@@ -2,12 +2,12 @@ import {
   getDefaultStockPage,
   getCadConvertApi,
   resolveCurrentPagePath,
-  fetchUnregisteredCads,
+  fetchCadFiles,
   fetchRegisteredAssets,
   registerCadAsset,
-  deleteCadAsset,
   buildConvertPreviewUrl,
   type RegisteredAsset,
+  type CadFileEntry,
 } from './common';
 
 // ============================================================
@@ -161,34 +161,38 @@ const openRegisterModal = (): void => {
     });
     return b;
   };
-  const tabNew = mkTab('新規登録');
-  const tabDelete = mkTab('登録済み（削除）');
+  const tabNew = mkTab('図面を登録');
+  const tabList = mkTab('登録済み一覧');
 
-  const selectTab = (which: 'new' | 'delete'): void => {
-    for (const t of [tabNew, tabDelete]) {
+  const selectTab = (which: 'new' | 'list'): void => {
+    for (const t of [tabNew, tabList]) {
       t.style.borderBottomColor = 'transparent';
       t.style.color = '#555';
       t.style.fontWeight = 'normal';
     }
-    const active = which === 'new' ? tabNew : tabDelete;
+    const active = which === 'new' ? tabNew : tabList;
     active.style.borderBottomColor = '#0d6efd';
     active.style.color = '#0d6efd';
     active.style.fontWeight = 'bold';
     content.innerHTML = '';
     if (which === 'new') renderNewTab(content);
-    else renderDeleteTab(content);
+    else renderListTab(content);
   };
 
   tabNew.addEventListener('click', () => selectTab('new'));
-  tabDelete.addEventListener('click', () => selectTab('delete'));
+  tabList.addEventListener('click', () => selectTab('list'));
 
   tabBar.appendChild(tabNew);
-  tabBar.appendChild(tabDelete);
+  tabBar.appendChild(tabList);
   body.appendChild(tabBar);
   body.appendChild(content);
 
   selectTab('new');
 };
+
+// タブ1(図面を登録)の要素から、指定の元 CAD で登録フォームを開く。
+// タブ2の「再登録」から呼ぶために、モジュールスコープに保持する。
+let openRegisterFormWith: ((file: string) => void) | null = null;
 
 // ------------------------------------------------------------
 // 新規登録タブ
@@ -196,49 +200,103 @@ const openRegisterModal = (): void => {
 const renderNewTab = (container: HTMLElement): void => {
   const src = getDefaultStockPage();
 
+  // タブ2の再登録から呼べるよう、登録フォームを開く関数を公開する。
+  openRegisterFormWith = (file: string) => renderRegisterForm(container, file, src);
+
   const info = document.createElement('div');
-  info.textContent = `「${src}」内の未登録 CAD（.dxf / .jww）から選び、向きを指定して別名で登録します。`;
-  Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px' });
+  info.innerHTML = `「${src}」内の CAD（.dxf / .jww）から選び、向きを指定して<b>別名で登録</b>します。`
+    + '<br>同じ図面を角度違いで何個でも登録できます（登録済みには <span style="color:#20a37a;font-weight:bold;">済</span> を表示）。';
+  Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
   container.appendChild(info);
+
+  // 検索ボックス
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = 'ファイル名で絞り込み...';
+  Object.assign(search.style, {
+    width: '100%', padding: '6px 8px', boxSizing: 'border-box', fontSize: '13px',
+    marginBottom: '10px', border: '1px solid #ccc', borderRadius: '4px',
+  });
+  container.appendChild(search);
 
   const loading = document.createElement('div');
   loading.textContent = '読み込み中...';
   Object.assign(loading.style, { color: '#666', padding: '16px', textAlign: 'center' });
   container.appendChild(loading);
 
-  fetchUnregisteredCads(src)
+  const listWrap = document.createElement('div');
+  Object.assign(listWrap.style, { display: 'flex', flexDirection: 'column', gap: '6px' });
+  container.appendChild(listWrap);
+
+  fetchCadFiles(src)
     .then((files) => {
       loading.remove();
       if (files.length === 0) {
         const empty = document.createElement('div');
-        empty.textContent = '未登録の CAD ファイルはありません（すべて登録済み、またはページに CAD がありません）。';
+        empty.textContent = `「${src}」に CAD ファイル（.dxf / .jww）が見つかりませんでした。`;
         Object.assign(empty.style, { color: '#666', padding: '16px', textAlign: 'center' });
         container.appendChild(empty);
         return;
       }
-      const list = document.createElement('div');
-      Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '6px' });
-      for (const file of files) {
-        const row = document.createElement('button');
-        row.type = 'button';
-        row.textContent = file;
-        Object.assign(row.style, {
-          display: 'block', width: '100%', textAlign: 'left', fontSize: '13px',
-          padding: '10px 12px', cursor: 'pointer', border: '1px solid #ddd',
-          borderRadius: '6px', background: '#fafafa',
-        });
-        row.addEventListener('click', () => renderRegisterForm(container, file, src));
-        list.appendChild(row);
-      }
-      container.appendChild(list);
+
+      const renderList = (filter: string): void => {
+        listWrap.innerHTML = '';
+        const kw = filter.trim().toLowerCase();
+        const shown = files.filter((f) => !kw || f.name.toLowerCase().includes(kw));
+        if (shown.length === 0) {
+          const none = document.createElement('div');
+          none.textContent = '該当するファイルがありません。';
+          Object.assign(none.style, { color: '#888', padding: '12px', textAlign: 'center', fontSize: '12px' });
+          listWrap.appendChild(none);
+          return;
+        }
+        for (const f of shown) {
+          listWrap.appendChild(buildCadRow(f, src, container));
+        }
+      };
+
+      renderList('');
+      search.addEventListener('input', () => renderList(search.value));
     })
     .catch((e) => {
       loading.remove();
       const err = document.createElement('div');
-      err.textContent = `未登録 CAD の取得に失敗しました: ${e.message}`;
+      err.textContent = `CAD 一覧の取得に失敗しました: ${e.message}`;
       Object.assign(err.style, { color: '#b00020', padding: '16px', textAlign: 'center', fontSize: '13px' });
       container.appendChild(err);
     });
+};
+
+// CAD 一覧の1行(登録状態で色分け・「済」バッジ)。
+const buildCadRow = (f: CadFileEntry, src: string, container: HTMLElement): HTMLElement => {
+  const row = document.createElement('button');
+  row.type = 'button';
+  Object.assign(row.style, {
+    display: 'flex', alignItems: 'center', gap: '8px', width: '100%', textAlign: 'left',
+    fontSize: '13px', padding: '10px 12px', cursor: 'pointer', borderRadius: '6px',
+    // 登録済みは緑系、未登録はグレー系で色分け。
+    border: f.registered ? '1px solid #7fceb3' : '1px solid #ddd',
+    background: f.registered ? '#eef9f3' : '#fafafa',
+  });
+
+  const nameEl = document.createElement('span');
+  nameEl.textContent = f.name;
+  Object.assign(nameEl.style, { flex: '1 1 auto', wordBreak: 'break-all' });
+  row.appendChild(nameEl);
+
+  if (f.registered) {
+    const badge = document.createElement('span');
+    badge.textContent = `済 (${f.registeredAs.length})`;
+    Object.assign(badge.style, {
+      flex: '0 0 auto', fontSize: '11px', fontWeight: 'bold', color: '#fff',
+      background: '#20a37a', borderRadius: '10px', padding: '2px 8px',
+    });
+    badge.title = `登録名: ${f.registeredAs.join(', ')}`;
+    row.appendChild(badge);
+  }
+
+  row.addEventListener('click', () => renderRegisterForm(container, f.name, src));
+  return row;
 };
 
 // 選んだ CAD の登録フォーム(回転プレビュー + 登録名入力)。
@@ -259,6 +317,24 @@ const renderRegisterForm = (container: HTMLElement, file: string, src: string): 
   title.textContent = `元 CAD: ${file}`;
   Object.assign(title.style, { fontWeight: 'bold', fontSize: '14px', marginBottom: '8px' });
   container.appendChild(title);
+
+  // この元 CAD の既存登録があれば注記する(再登録時の重複認識ミス防止)。
+  const existingNote = document.createElement('div');
+  Object.assign(existingNote.style, {
+    fontSize: '12px', color: '#20a37a', marginBottom: '8px', display: 'none',
+  });
+  container.appendChild(existingNote);
+  fetchRegisteredAssets(src)
+    .then((assets) => {
+      const same = assets.filter((a) => a.srcFile === file);
+      if (same.length > 0) {
+        existingNote.style.display = 'block';
+        existingNote.textContent = `この図面は既に ${same.length} 件登録済みです（${
+          same.map((a) => `${a.name}:${a.rotate}°`).join(', ')
+        }）。別名で追加登録できます。`;
+      }
+    })
+    .catch(() => { /* 注記は任意なので失敗は無視 */ });
 
   let rotate = 0;
   // 登録名の初期候補(元名 + 回転サフィックス)。ユーザーが編集可能。
@@ -390,39 +466,65 @@ const renderRegisterForm = (container: HTMLElement, file: string, src: string): 
 };
 
 // ------------------------------------------------------------
-// 削除タブ
+// 登録済み一覧タブ(閲覧のみ・削除なし)
 // ------------------------------------------------------------
-const renderDeleteTab = (container: HTMLElement): void => {
+const renderListTab = (container: HTMLElement): void => {
   const src = getDefaultStockPage();
 
   const info = document.createElement('div');
-  info.textContent = '登録済みの図面です。削除すると記法からの参照ができなくなります（向きの変更はできないため、変えたい場合は新規登録で別名登録してください）。';
-  Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px' });
+  info.innerHTML = '登録済みの図面です（記法の <code>file</code> に登録名を指定して使います）。'
+    + '<br>向きを変えたい / CAD を修正したときは、各図面の<b>「別角度で再登録」</b>から別名で追加登録してください。';
+  Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
   container.appendChild(info);
+
+  // 検索ボックス(登録名・元CAD名で絞り込み)
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = '登録名・元ファイル名で絞り込み...';
+  Object.assign(search.style, {
+    width: '100%', padding: '6px 8px', boxSizing: 'border-box', fontSize: '13px',
+    marginBottom: '10px', border: '1px solid #ccc', borderRadius: '4px',
+  });
+  container.appendChild(search);
 
   const loading = document.createElement('div');
   loading.textContent = '読み込み中...';
   Object.assign(loading.style, { color: '#666', padding: '16px', textAlign: 'center' });
   container.appendChild(loading);
 
+  const grid = document.createElement('div');
+  Object.assign(grid.style, {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '12px',
+  });
+  container.appendChild(grid);
+
   fetchRegisteredAssets(src)
     .then((assets) => {
       loading.remove();
       if (assets.length === 0) {
         const empty = document.createElement('div');
-        empty.textContent = '登録済みの図面はありません。';
+        empty.textContent = '登録済みの図面はありません。「図面を登録」タブから登録できます。';
         Object.assign(empty.style, { color: '#666', padding: '16px', textAlign: 'center' });
         container.appendChild(empty);
         return;
       }
-      const grid = document.createElement('div');
-      Object.assign(grid.style, {
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '12px',
-      });
-      for (const asset of assets) {
-        grid.appendChild(buildAssetCard(asset, container));
-      }
-      container.appendChild(grid);
+      const render = (filter: string): void => {
+        grid.innerHTML = '';
+        const kw = filter.trim().toLowerCase();
+        const shown = assets.filter((a) => !kw
+          || a.name.toLowerCase().includes(kw)
+          || (a.srcFile || '').toLowerCase().includes(kw));
+        if (shown.length === 0) {
+          const none = document.createElement('div');
+          none.textContent = '該当する登録がありません。';
+          Object.assign(none.style, { color: '#888', padding: '12px', gridColumn: '1 / -1', textAlign: 'center', fontSize: '12px' });
+          grid.appendChild(none);
+          return;
+        }
+        for (const asset of shown) grid.appendChild(buildAssetCard(asset, container));
+      };
+      render('');
+      search.addEventListener('input', () => render(search.value));
     })
     .catch((e) => {
       loading.remove();
@@ -433,6 +535,7 @@ const renderDeleteTab = (container: HTMLElement): void => {
     });
 };
 
+// 登録済みカード(閲覧＋再登録。削除は UI から廃止)。
 const buildAssetCard = (asset: RegisteredAsset, container: HTMLElement): HTMLElement => {
   const cell = document.createElement('div');
   Object.assign(cell.style, {
@@ -459,35 +562,30 @@ const buildAssetCard = (asset: RegisteredAsset, container: HTMLElement): HTMLEle
   meta.textContent = `元: ${asset.srcFile} / 回転 ${asset.rotate}°`;
   Object.assign(meta.style, { fontSize: '11px', color: '#888' });
 
-  const del = document.createElement('button');
-  del.type = 'button';
-  del.textContent = '削除';
-  Object.assign(del.style, {
-    background: '#dc3545', color: '#fff', border: 'none', borderRadius: '4px',
+  // 再登録: この元 CAD を「図面を登録」タブの登録フォームに引き継いで開く。
+  const reReg = document.createElement('button');
+  reReg.type = 'button';
+  reReg.textContent = '別角度で再登録';
+  Object.assign(reReg.style, {
+    background: '#eef4ff', color: '#0d6efd', border: '1px solid #b6d0ff', borderRadius: '4px',
     padding: '6px', cursor: 'pointer', fontSize: '12px',
   });
-  del.addEventListener('click', () => {
-    // eslint-disable-next-line no-alert
-    if (!window.confirm(`「${asset.name}」を削除しますか？`)) return;
-    del.disabled = true;
-    del.textContent = '削除中...';
-    deleteCadAsset(asset.name)
-      .then(() => {
-        showToast(`削除しました: ${asset.name}`);
-        container.innerHTML = '';
-        renderDeleteTab(container);
-      })
-      .catch((e) => {
-        showToast(`削除に失敗しました: ${e.message}`, true);
-        del.disabled = false;
-        del.textContent = '削除';
-      });
+  reReg.addEventListener('click', () => {
+    if (!asset.srcFile) {
+      showToast('この登録には元 CAD 情報がないため再登録できません', true);
+      return;
+    }
+    // 「図面を登録」タブへ切り替えて、そのフォームを開く。
+    // openRegisterFormWith は renderNewTab が公開する。まずタブを描画してから呼ぶ。
+    container.innerHTML = '';
+    renderNewTab(container);
+    if (openRegisterFormWith) openRegisterFormWith(asset.srcFile);
   });
 
   cell.appendChild(thumb);
   cell.appendChild(name);
   cell.appendChild(meta);
-  cell.appendChild(del);
+  cell.appendChild(reReg);
   return cell;
 };
 

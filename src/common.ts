@@ -51,15 +51,23 @@ export interface RegisteredAsset {
   imageUrl: string;
 }
 
-// 未登録の CAD ファイル名一覧を取得する(新規登録タブ用)。
-export const fetchUnregisteredCads = async (src: string): Promise<string[]> => {
+// CAD ファイル(登録状態付き)1件
+export interface CadFileEntry {
+  name: string;
+  registered: boolean;
+  registeredAs: string[];
+}
+
+// ページ内の CAD ファイル一覧を登録状態付きで取得する(新規登録タブ用)。
+// 登録済みの元 CAD も除外せず返る(別名・別角度で再登録できる運用)。
+export const fetchCadFiles = async (src: string): Promise<CadFileEntry[]> => {
   const base = getAssetsApiBase();
   if (!base) throw new Error('cadConvertApi is not configured');
-  const url = `${base}/unregistered?src=${encodeURIComponent(src)}`;
+  const url = `${base}/cad-files?src=${encodeURIComponent(src)}`;
   const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`fetch unregistered failed: ${res.status}`);
+  if (!res.ok) throw new Error(`fetch cad files failed: ${res.status}`);
   const data = await res.json();
-  return Array.isArray(data?.files) ? (data.files as string[]) : [];
+  return Array.isArray(data?.files) ? (data.files as CadFileEntry[]) : [];
 };
 
 // 登録済みアセット一覧を取得する(削除タブ用)。src 省略で全件。
@@ -93,6 +101,9 @@ export const registerCadAsset = async (params: {
 };
 
 // 登録アセットを削除する。
+// 注意: 現在の向き設定 UI からは呼び出さない(削除は過去ページを壊す恐れがあり、
+// 安全な使用箇所確認が難しいため UI から廃止)。将来のサーバー CLI ツール等の
+// ために関数は残置する。
 export const deleteCadAsset = async (name: string): Promise<void> => {
   const base = getAssetsApiBase();
   if (!base) throw new Error('cadConvertApi is not configured');
