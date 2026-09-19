@@ -3,7 +3,12 @@ import {
   getCadConvertApi,
   resolveCurrentPagePath,
   fetchRegisteredAssets,
+  resolveRegisteredAssetUrl,
+  getPageIdByPath,
+  getPageBodyById,
+  updatePageBody,
   normalizeForSearch,
+  toNumber,
   clamp,
   textColorForBg,
   type RegisteredAsset,
@@ -17,6 +22,7 @@ import {
 // ============================================================
 
 const BTN_ID = 'growi-custom-map-editor-fab';
+const EDIT_BTN_ID = 'growi-custom-map-editor-edit-fab';
 const MODAL_ID = 'growi-custom-map-editor-modal';
 
 // ============================================================
@@ -83,6 +89,116 @@ const buildCustomMapSnippet = (settings: EditorMapSettings, markers: EditorMarke
 
   lines.push(':::');
   return `\n${lines.join('\n')}\n`;
+};
+
+// ============================================================
+// 既存記法のパース(再編集用): 本文テキストから :::custom-map ブロックを抽出し、
+// EditorMapSettings / EditorMarker に逆変換する。buildCustomMapSnippet の逆操作。
+// ============================================================
+
+// key="value" / key='value' / key=value を拾う。値内の \" は後で復元する。
+const KV_REGEX = /(\w+)\s*=\s*(?:"((?:\\"|[^"])*)"|'((?:\\'|[^'])*)'|(\S+))/g;
+
+// エスケープされた \" \' を元に戻す(attrStr の逆)。
+const unescapeAttr = (s: string): string => s.replace(/\\(["'])/g, '$1');
+
+// 属性文字列(key=value...)を辞書化する。
+const parseAttrs = (text: string): Record<string, string> => {
+  const attrs: Record<string, string> = {};
+  let m: RegExpExecArray | null;
+  KV_REGEX.lastIndex = 0;
+  // eslint-disable-next-line no-cond-assign
+  while ((m = KV_REGEX.exec(text)) !== null) {
+    const key = m[1];
+    const raw = m[2] ?? m[3] ?? m[4] ?? '';
+    attrs[key] = unescapeAttr(raw);
+  }
+  return attrs;
+};
+
+// マーカー行(- x=.. y=.. ...)1 本を EditorMarker に変換。x/y が無ければ null。
+const parseMarkerLineToEditor = (line: string): EditorMarker | null => {
+  const attrs = parseAttrs(line);
+  if (attrs.x == null && attrs.y == null) return null;
+  return {
+    x: clamp(toNumber(attrs.x, 50), 0, 100),
+    y: clamp(toNumber(attrs.y, 50), 0, 100),
+    label: attrs.label || '',
+    photo: attrs.photo || '',
+    color: attrs.color || DEFAULT_MARKER_COLOR,
+    desc: attrs.desc || '',
+  };
+};
+
+// 抽出した 1 ブロックを表す。raw は本文中の該当部分(置換対象)そのもの。
+export interface CustomMapBlock {
+  raw: string; // 本文中の該当ブロック全体(:::custom-map{..} .. ::: を含む)
+  start: number; // 本文中の開始インデックス
+  end: number; // 本文中の終了インデックス(排他)
+  settings: EditorMapSettings;
+  markers: EditorMarker[];
+}
+
+// 本文テキストから全ての :::custom-map{ ... } ... ::: ブロックを抽出する。
+// フェンスは行頭の `:::custom-map{...}` から、行頭 `:::` までを 1 ブロックとする。
+const CUSTOM_MAP_OPEN = /^:::custom-map\{([^}]*)\}[ \t]*$/;
+const FENCE_CLOSE = /^:::[ \t]*$/;
+
+const extractCustomMapBlocks = (bodyText: string): CustomMapBlock[] => {
+  const blocks: CustomMapBlock[] = [];
+  const lines = bodyText.split('\n');
+
+  // 各行の本文中での開始オフセットを事前計算する(+1 は改行分)。
+  const lineOffsets: number[] = [];
+  let acc = 0;
+  for (const line of lines) {
+    lineOffsets.push(acc);
+    acc += line.length + 1;
+  }
+
+  let i = 0;
+  while (i < lines.length) {
+    const open = CUSTOM_MAP_OPEN.exec(lines[i]);
+    if (!open) { i += 1; continue; }
+
+    // 閉じフェンスを探す。
+    let j = i + 1;
+    while (j < lines.length && !FENCE_CLOSE.test(lines[j])) j += 1;
+    if (j >= lines.length) break; // 閉じが無ければ以降は対象外
+
+    const attrs = parseAttrs(open[1]);
+    const markers: EditorMarker[] = [];
+    for (let k = i + 1; k < j; k += 1) {
+      const marker = parseMarkerLineToEditor(lines[k]);
+      if (marker) markers.push(marker);
+    }
+
+    const settings: EditorMapSettings = {
+      file: attrs.file || '',
+      src: attrs.src || '',
+      cx: toNumber(attrs.cx, 50),
+      cy: toNumber(attrs.cy, 50),
+      scale: toNumber(attrs.scale, 1),
+      link: attrs.link || 'マップを開く',
+      restore: toNumber(attrs.restore, 15),
+      rotate: normalizeRotate(toNumber(attrs.rotate, 0)),
+    };
+
+    const start = lineOffsets[i];
+    // ブロック末尾(閉じフェンス行の行末)までを範囲とする。
+    const end = lineOffsets[j] + lines[j].length;
+    blocks.push({
+      raw: bodyText.slice(start, end),
+      start,
+      end,
+      settings,
+      markers,
+    });
+
+    i = j + 1;
+  }
+
+  return blocks;
 };
 
 // ------------------------------------------------------------
@@ -158,6 +274,46 @@ const insertTextAtCursor = (text: string): boolean => {
   return false;
 };
 
+// カーソルが既存の :::custom-map ブロックの内側にあるかを、DOM 上の行
+// (.cm-line)を上方向に辿って判定する。直近上方で custom-map の開始フェンスに
+// 先に当たれば「内側」。閉じフェンス :::(custom-map 開始でない) に先に当たれば
+// 「外側」。設計方針: 記法の中に新規記法を挿入すると構成を壊すため、
+// custom-map ブロック内での新規作成は止めて再編集を促す。
+// 注: CodeMirror6 の仮想スクロールで上方行が DOM に無い場合は判定できず false
+// (＝内側でない扱い)を返す。カーソル周辺行は描画されているため実用上は機能する。
+const isCursorInsideCustomMap = (): boolean => {
+  const content = findEditorContent();
+  if (!content) return false;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return false;
+
+  // カーソルのある行要素(.cm-line)を特定する。
+  let node: Node | null = sel.getRangeAt(0).startContainer;
+  let lineEl: HTMLElement | null = null;
+  while (node && node !== content) {
+    if (node instanceof HTMLElement && node.classList.contains('cm-line')) {
+      lineEl = node;
+      break;
+    }
+    node = node.parentNode;
+  }
+  if (!lineEl) return false;
+
+  // カーソル行を含め、上方向に .cm-line を辿る。
+  const openRe = /^:::custom-map\{/;
+  const fenceRe = /^:::/;
+  let el: HTMLElement | null = lineEl;
+  // カーソル行自身が開始フェンスなら内側とみなす。
+  while (el) {
+    const text = (el.textContent || '').trim();
+    if (openRe.test(text)) return true; // custom-map の開始に先に当たった=内側
+    if (fenceRe.test(text) && el !== lineEl) return false; // 別の閉じ/開始フェンス=外側
+    el = el.previousElementSibling as HTMLElement | null;
+    if (el && !el.classList.contains('cm-line')) el = null;
+  }
+  return false;
+};
+
 const copyToClipboard = async (text: string): Promise<void> => {
   try {
     await navigator.clipboard.writeText(text);
@@ -168,17 +324,17 @@ const copyToClipboard = async (text: string): Promise<void> => {
   }
 };
 
-const showToast = (message: string): void => {
+const showToast = (message: string, isError = false): void => {
   const toast = document.createElement('div');
   toast.textContent = message;
   Object.assign(toast.style, {
     position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
-    background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '10px 16px',
-    borderRadius: '6px', fontSize: '13px', zIndex: '100000',
+    background: isError ? 'rgba(176,0,32,0.92)' : 'rgba(0,0,0,0.85)', color: '#fff',
+    padding: '10px 16px', borderRadius: '6px', fontSize: '13px', zIndex: '100000',
     maxWidth: '80vw', textAlign: 'center', pointerEvents: 'none',
   });
   document.body.appendChild(toast);
-  window.setTimeout(() => toast.remove(), 3000);
+  window.setTimeout(() => toast.remove(), isError ? 4000 : 3000);
 };
 
 // ============================================================
@@ -243,6 +399,160 @@ const createModalShell = (
 // 設計方針: 一般ページ編集者は media-library を直接参照できないため、GUI の
 // 平面図選択は「API に登録済みの地図アセット(GET /assets)」からのみ行う。
 // media-library の生ファイルは選択肢に出さない(記法直書きも今後不許可)。
+// 現在表示中ページの pageId を解決する。ID ベース URL ならそのまま、
+// パスベースなら getPageIdByPath で引く。解決できなければ null。
+const resolveCurrentPageId = async (): Promise<string | null> => {
+  const raw = typeof location !== 'undefined' ? location.pathname.replace(/^\//, '') : '';
+  const seg = raw.split('/')[0] || '';
+  if (/^[0-9a-f]{24}$/i.test(seg)) return seg;
+  const path = await resolveCurrentPagePath();
+  if (!path) return null;
+  return getPageIdByPath(path);
+};
+
+// ------------------------------------------------------------
+// 「地図を編集」モーダル: ページ本文中の :::custom-map ブロックを一覧表示し、
+// 選んで再編集する。本文は保存済みリビジョン(GET /_api/v3/page)から取得し、
+// 確定時に該当ブロックだけ差し替えて保存(PUT)する。
+// 設計: 一般編集者は登録アセット経由のみ。旧生ファイル名の記法は解決できない
+// ため、その旨を表示して編集不可にする(新方式で入れ直す運用)。
+// ------------------------------------------------------------
+const openEditListModal = async (): Promise<void> => {
+  const { body } = createModalShell('地図を編集（このページ内の地図）');
+
+  const loading = document.createElement('div');
+  loading.textContent = '読み込み中...';
+  Object.assign(loading.style, { color: '#666', padding: '20px', textAlign: 'center' });
+  body.appendChild(loading);
+
+  // 現在ページの pageId と 本文を取得する。
+  const pageId = await resolveCurrentPageId();
+  if (!pageId) {
+    loading.remove();
+    const err = document.createElement('div');
+    err.textContent = 'このページの情報を取得できませんでした。';
+    Object.assign(err.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px' });
+    body.appendChild(err);
+    return;
+  }
+
+  const pageBody = await getPageBodyById(pageId);
+  if (!pageBody) {
+    loading.remove();
+    const err = document.createElement('div');
+    err.textContent = 'ページ本文を取得できませんでした。一度ページを保存してからお試しください。';
+    Object.assign(err.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px' });
+    body.appendChild(err);
+    return;
+  }
+
+  const blocks = extractCustomMapBlocks(pageBody.body);
+  loading.remove();
+
+  const note = document.createElement('div');
+  note.innerHTML = 'このページ内の地図を選んで編集できます。'
+    + '<br><b>注意:</b> 編集を保存するとページが再読み込みされます。未保存の編集がある場合は先に保存してください。';
+  Object.assign(note.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
+  body.appendChild(note);
+
+  if (blocks.length === 0) {
+    const empty = document.createElement('div');
+    empty.textContent = 'このページには編集できる地図（:::custom-map）がありません。';
+    Object.assign(empty.style, { color: '#666', padding: '20px', textAlign: 'center' });
+    body.appendChild(empty);
+    return;
+  }
+
+  const grid = document.createElement('div');
+  Object.assign(grid.style, {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px',
+  });
+  body.appendChild(grid);
+
+  // 各ブロックのプレビューを作る。file が登録アセットなら imageUrl を解決して
+  // サムネイル表示。解決できなければ「登録アセットではない」として編集不可にする。
+  blocks.forEach((block, index) => {
+    const cell = document.createElement('div');
+    Object.assign(cell.style, {
+      display: 'flex', flexDirection: 'column', gap: '6px',
+      border: '1px solid #ddd', borderRadius: '6px', padding: '8px', background: '#fafafa',
+    });
+
+    const thumbWrap = document.createElement('div');
+    Object.assign(thumbWrap.style, {
+      width: '100%', height: '100px', background: '#fff', display: 'flex',
+      justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
+    });
+    const thumb = document.createElement('img');
+    thumb.loading = 'lazy';
+    Object.assign(thumb.style, { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' });
+    const thumbNote = document.createElement('div');
+    Object.assign(thumbNote.style, { fontSize: '11px', color: '#999' });
+    thumbNote.textContent = '読み込み中...';
+    thumbWrap.appendChild(thumbNote);
+    cell.appendChild(thumbWrap);
+
+    const fileName = document.createElement('div');
+    fileName.textContent = block.settings.file || '(file 未指定)';
+    Object.assign(fileName.style, {
+      fontSize: '12px', color: '#333', wordBreak: 'break-all', fontFamily: 'monospace', lineHeight: '1.3',
+    });
+    cell.appendChild(fileName);
+
+    const meta = document.createElement('div');
+    meta.textContent = `マーカー ${block.markers.length} 個${block.settings.rotate ? ` / 回転 ${block.settings.rotate}°` : ''}`;
+    Object.assign(meta.style, { fontSize: '11px', color: '#888' });
+    cell.appendChild(meta);
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'この地図を編集';
+    Object.assign(editBtn.style, {
+      background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px',
+      padding: '6px', cursor: 'pointer', fontSize: '12px',
+    });
+    cell.appendChild(editBtn);
+
+    grid.appendChild(cell);
+
+    // 登録アセットの imageUrl を解決してプレビュー＋編集可否を決める。
+    resolveRegisteredAssetUrl(block.settings.file, [pageBody.path, getDefaultStockPage()])
+      .then((url) => {
+        if (url) {
+          thumbNote.remove();
+          thumb.src = url;
+          thumbWrap.appendChild(thumb);
+          editBtn.addEventListener('click', () => {
+            openMapPreviewModal({
+              imageUrl: url,
+              initialSettings: block.settings,
+              initialMarkers: block.markers,
+              editContext: {
+                pageId,
+                revisionId: pageBody.revisionId,
+                fullBody: pageBody.body,
+                block,
+              },
+            });
+          });
+        } else {
+          // 登録アセットでない(旧生ファイル名など)。編集対象外にする。
+          thumbNote.textContent = '登録アセットではありません';
+          editBtn.disabled = true;
+          Object.assign(editBtn.style, { background: '#ccc', cursor: 'not-allowed' });
+          editBtn.textContent = '編集できません';
+          const hint = document.createElement('div');
+          hint.textContent = 'この地図は登録アセットではないため編集できません。新方式で登録・作成し直してください。';
+          Object.assign(hint.style, { fontSize: '10px', color: '#b00020', lineHeight: '1.4' });
+          cell.appendChild(hint);
+        }
+      })
+      .catch(() => {
+        thumbNote.textContent = 'プレビュー取得失敗';
+      });
+  });
+};
+
 const openImageListModal = async (): Promise<void> => {
   const { body } = createModalShell('地図を選択（登録済みアセット）');
 
@@ -336,7 +646,12 @@ const openImageListModal = async (): Promise<void> => {
     cell.appendChild(thumb);
     cell.appendChild(name);
     cell.appendChild(meta);
-    cell.addEventListener('click', () => openMapPreviewModal(asset));
+    cell.addEventListener('click', () => openMapPreviewModal({
+      imageUrl: asset.imageUrl,
+      initialSettings: {
+        file: asset.name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
+      },
+    }));
     return cell;
   };
 
@@ -360,16 +675,37 @@ const openImageListModal = async (): Promise<void> => {
   search.addEventListener('input', () => render(search.value));
 };
 
-// 選んだ登録アセットにマーカーを配置する編集モーダル。
-const openMapPreviewModal = (asset: RegisteredAsset): void => {
-  const name = asset.name; // 登録名。記法の file= にそのまま使う。
-  const { body } = createModalShell(`地図を作成: ${name}`, false);
+// 既存記法の再編集で使う、置換対象ブロックの文脈。
+interface EditContext {
+  pageId: string;
+  revisionId: string;
+  fullBody: string; // ページ本文全体(この中の block を置換する)
+  block: CustomMapBlock; // 置換対象ブロック
+}
+
+// マーカー配置の編集モーダル。新規作成と既存記法の再編集で共用する。
+//   - 新規: openMapPreviewModal({ imageUrl, file }) 相当。settings/markers は初期値から。
+//   - 編集: initialSettings/initialMarkers/editContext を渡す。確定でブロック置換→保存。
+interface PreviewModalOptions {
+  imageUrl: string; // 左ペインに表示する平面図画像 URL(登録アセットの imageUrl)
+  initialSettings: EditorMapSettings;
+  initialMarkers?: EditorMarker[];
+  editContext?: EditContext; // あれば「編集(置換保存)」、無ければ「新規(挿入)」
+}
+
+const openMapPreviewModal = (opts: PreviewModalOptions): void => {
+  const isEdit = !!opts.editContext;
+  const name = opts.initialSettings.file;
+  const { body } = createModalShell(
+    `${isEdit ? '地図を編集' : '地図を作成'}: ${name}`,
+    false,
+  );
   Object.assign(body.style, { padding: '0' });
 
-  const settings: EditorMapSettings = {
-    file: name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
-  };
-  const markers: EditorMarker[] = [];
+  // 初期値をコピーして編集用の作業データにする(呼び出し側の初期値を壊さない)。
+  const settings: EditorMapSettings = { ...opts.initialSettings };
+  const markers: EditorMarker[] = (opts.initialMarkers || []).map((m) => ({ ...m }));
+  const imageUrl = opts.imageUrl;
   let selected = -1;
 
   const layout = document.createElement('div');
@@ -389,7 +725,7 @@ const openMapPreviewModal = (asset: RegisteredAsset): void => {
     position: 'absolute', top: '0', left: '0', transformOrigin: '0 0', willChange: 'transform',
   });
   const img = document.createElement('img');
-  img.src = asset.imageUrl;
+  img.src = imageUrl;
   img.alt = name;
   Object.assign(img.style, { display: 'block', userSelect: 'none', pointerEvents: 'none' });
   img.draggable = false;
@@ -536,12 +872,20 @@ const openMapPreviewModal = (asset: RegisteredAsset): void => {
 
     const back = document.createElement('button');
     back.type = 'button';
-    back.textContent = '← 地図一覧に戻る';
+    // 新規: アセット一覧に戻る。編集: 破棄して閉じる(一覧に戻る動線はないため)。
+    back.textContent = isEdit ? '← 編集を破棄して閉じる' : '← 地図一覧に戻る';
     Object.assign(back.style, {
       background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px',
       padding: '6px 10px', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start',
     });
-    back.addEventListener('click', () => { openImageListModal(); });
+    back.addEventListener('click', () => {
+      if (isEdit) {
+        const overlay = document.getElementById(MODAL_ID);
+        if (overlay) overlay.remove();
+      } else {
+        openImageListModal();
+      }
+    });
     panel.appendChild(back);
 
     panel.appendChild(sectionTitle('地図全体の設定'));
@@ -614,20 +958,46 @@ const openMapPreviewModal = (asset: RegisteredAsset): void => {
 
     const confirm = document.createElement('button');
     confirm.type = 'button';
-    confirm.textContent = '確定して挿入';
+    confirm.textContent = isEdit ? '変更を保存' : '確定して挿入';
     Object.assign(confirm.style, {
       marginTop: 'auto', background: '#0d6efd', color: '#fff', border: 'none',
       borderRadius: '4px', padding: '10px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold',
     });
     confirm.addEventListener('click', () => {
-      const snippet = buildCustomMapSnippet(settings, markers);
+      // 生成する記法。編集時は前後の余計な空行を付けない(ブロックだけ差し替えるため)。
+      const snippet = buildCustomMapSnippet(settings, markers).replace(/^\n+|\n+$/g, '');
+
+      if (isEdit && opts.editContext) {
+        // 既存ブロックを置換してページ本文を保存する。
+        const ctx = opts.editContext;
+        const newBody = ctx.fullBody.slice(0, ctx.block.start)
+          + snippet
+          + ctx.fullBody.slice(ctx.block.end);
+        confirm.disabled = true;
+        confirm.textContent = '保存中...';
+        updatePageBody(ctx.pageId, ctx.revisionId, newBody)
+          .then(() => {
+            showToast('地図を保存しました。ページを再読み込みします。');
+            // 保存済み本文とエディタの表示を一致させるためリロードする。
+            window.setTimeout(() => window.location.reload(), 800);
+          })
+          .catch((err) => {
+            console.error('[custom-map-editor] save failed', err);
+            showToast(`保存に失敗しました: ${err.message}`, true);
+            confirm.disabled = false;
+            confirm.textContent = '変更を保存';
+          });
+        return;
+      }
+
+      // 新規: カーソル位置に挿入。
       const overlay = document.getElementById(MODAL_ID);
       if (overlay) overlay.remove();
-      const ok = insertTextAtCursor(snippet);
+      const ok = insertTextAtCursor(buildCustomMapSnippet(settings, markers));
       if (ok) {
         showToast('地図の記法をカーソル位置に挿入しました。');
       } else {
-        copyToClipboard(snippet);
+        copyToClipboard(buildCustomMapSnippet(settings, markers));
       }
     });
     panel.appendChild(confirm);
@@ -895,21 +1265,29 @@ const isOnStockPageCached = (): boolean => {
 const ensureFab = (): void => {
   const editing = isEditing();
   const existing = document.getElementById(BTN_ID);
+  const existingEdit = document.getElementById(EDIT_BTN_ID);
+
+  const removeAll = (): void => {
+    if (existing) existing.remove();
+    if (existingEdit) existingEdit.remove();
+  };
 
   if (!editing) {
-    if (existing) existing.remove();
+    removeAll();
     return;
   }
 
   // ストックページなら地図作成ボタンを出さない(向き設定ボタンと役割分離)。
   refreshStockJudgement(() => ensureFab());
   if (isOnStockPageCached()) {
-    if (existing) existing.remove();
+    removeAll();
     return;
   }
 
-  if (existing) return;
+  if (existing && existingEdit) return;
+  removeAll();
 
+  // 「地図を作成」FAB(新規)。
   const fab = document.createElement('button');
   fab.id = BTN_ID;
   fab.type = 'button';
@@ -920,14 +1298,35 @@ const ensureFab = (): void => {
     padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
     boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
   });
-
   fab.addEventListener('click', (e) => {
     e.preventDefault();
     saveEditorSelection();
+    // 安全ガード: カーソルが既存 custom-map ブロック内なら新規挿入しない。
+    // 記法の中に記法を挿入すると構成が壊れるため、編集を促す。
+    if (isCursorInsideCustomMap()) {
+      showToast('地図の記法の中にカーソルがあります。既存の地図を直すには「地図を編集」を使ってください。', true);
+      return;
+    }
     openImageListModal().catch((err) => console.error('[custom-map-editor] failed to open modal', err));
   });
-
   document.body.appendChild(fab);
+
+  // 「地図を編集」FAB。作成ボタンの上に配置する。
+  const editFab = document.createElement('button');
+  editFab.id = EDIT_BTN_ID;
+  editFab.type = 'button';
+  editFab.textContent = '🗺 地図を編集';
+  Object.assign(editFab.style, {
+    position: 'fixed', right: '24px', bottom: '124px', zIndex: '99999',
+    background: '#20a37a', color: '#fff', border: 'none', borderRadius: '24px',
+    padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
+  });
+  editFab.addEventListener('click', (e) => {
+    e.preventDefault();
+    openEditListModal().catch((err) => console.error('[custom-map-editor] failed to open edit modal', err));
+  });
+  document.body.appendChild(editFab);
 };
 
 // ------------------------------------------------------------
@@ -957,4 +1356,6 @@ export const deactivateEditor = (): void => {
   if (intervalId) { window.clearInterval(intervalId); intervalId = undefined; }
   const existing = document.getElementById(BTN_ID);
   if (existing) existing.remove();
+  const existingEdit = document.getElementById(EDIT_BTN_ID);
+  if (existingEdit) existingEdit.remove();
 };

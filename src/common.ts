@@ -260,6 +260,67 @@ export const resolveCurrentPagePath = async (): Promise<string> => {
   return promise;
 };
 
+// ページ本文(保存済みの最新リビジョン)と、更新用の revisionId・パスをまとめて取得する。
+// 既存記法の再編集で使う。GET /_api/v3/page?pageId= のレスポンス
+// (page.revision.body / page.revision._id)を読む。取得できなければ null。
+export interface PageBody {
+  body: string;
+  revisionId: string;
+  path: string;
+}
+
+export const getPageBodyById = async (pageId: string): Promise<PageBody | null> => {
+  try {
+    const data = await apiv3Get('/page', { pageId });
+    const d = data as Record<string, unknown>;
+    const page = (d.page || (d.data as Record<string, unknown>)?.page || d) as
+      | Record<string, unknown>
+      | undefined;
+    const revision = page?.revision as Record<string, unknown> | undefined;
+    const body = revision?.body;
+    const revisionId = revision?._id;
+    const path = page?.path;
+    if (typeof body !== 'string' || typeof revisionId !== 'string') return null;
+    return {
+      body,
+      revisionId,
+      path: typeof path === 'string' ? path : '',
+    };
+  } catch (e) {
+    console.error('[custom-map] failed to get page body', pageId, e);
+    return null;
+  }
+};
+
+// ページ本文を更新する(既存記法の再編集の保存)。
+// PUT /_api/v3/page に { pageId, revisionId, body, origin } を送る。
+// revisionId が現在のリビジョンと食い違う場合、GROWI 側で更新が弾かれる
+// (他者編集との競合を安全に検出)。origin は 'view'(表示側からの単発更新)。
+// 成功可否を boolean で返す。失敗時はメッセージを添えて例外を投げる。
+export const updatePageBody = async (
+  pageId: string,
+  revisionId: string,
+  body: string,
+): Promise<void> => {
+  const res = await fetch('/_api/v3/page', {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      pageId, revisionId, body, origin: 'view',
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const d = data as Record<string, unknown>;
+    const errs = d.errors as Array<Record<string, unknown>> | undefined;
+    const msg = (errs && errs[0] && errs[0].message)
+      || d.message
+      || `update page failed: ${res.status}`;
+    throw new Error(String(msg));
+  }
+};
+
 // ページパスから、そのページ ID を取得する
 export const getPageIdByPath = async (pagePath: string): Promise<string | null> => {
   try {
