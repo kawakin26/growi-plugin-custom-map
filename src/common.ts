@@ -311,6 +311,17 @@ export const toNumber = (value: string | null | undefined, fallback: number): nu
 
 export const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
 
+// 検索照合用に文字列を正規化する。NFKC で全角英数字・記号を半角に統一し、
+// 小文字化する。これで「ＡＢＣ」と「abc」を区別せず絞り込める。
+export const normalizeForSearch = (s: string): string => {
+  if (!s) return '';
+  try {
+    return s.normalize('NFKC').toLowerCase();
+  } catch {
+    return s.toLowerCase();
+  }
+};
+
 // 背景色(#rgb / #rrggbb / rgb(...) 等)に対して読みやすい文字色(黒/白)を返す。
 // 輝度が高い(明るい)背景なら黒、暗い背景なら白。淡色ラベルでも読めるようにする。
 export const textColorForBg = (bg: string): string => {

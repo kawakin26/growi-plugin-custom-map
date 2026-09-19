@@ -6,6 +6,7 @@ import {
   fetchRegisteredAssets,
   registerCadAsset,
   buildConvertPreviewUrl,
+  normalizeForSearch,
   type RegisteredAsset,
   type CadFileEntry,
 } from './common';
@@ -241,8 +242,8 @@ const renderNewTab = (container: HTMLElement): void => {
 
       const renderList = (filter: string): void => {
         listWrap.innerHTML = '';
-        const kw = filter.trim().toLowerCase();
-        const shown = files.filter((f) => !kw || f.name.toLowerCase().includes(kw));
+        const kw = normalizeForSearch(filter.trim());
+        const shown = files.filter((f) => !kw || normalizeForSearch(f.name).includes(kw));
         if (shown.length === 0) {
           const none = document.createElement('div');
           none.textContent = '該当するファイルがありません。';
@@ -510,10 +511,10 @@ const renderListTab = (container: HTMLElement): void => {
       }
       const render = (filter: string): void => {
         grid.innerHTML = '';
-        const kw = filter.trim().toLowerCase();
+        const kw = normalizeForSearch(filter.trim());
         const shown = assets.filter((a) => !kw
-          || a.name.toLowerCase().includes(kw)
-          || (a.srcFile || '').toLowerCase().includes(kw));
+          || normalizeForSearch(a.name).includes(kw)
+          || normalizeForSearch(a.srcFile || '').includes(kw));
         if (shown.length === 0) {
           const none = document.createElement('div');
           none.textContent = '該当する登録がありません。';
