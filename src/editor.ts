@@ -1,12 +1,12 @@
 import {
   getDefaultStockPage,
-  getAttachmentsForPage,
+  getCadConvertApi,
   resolveCurrentPagePath,
-  attachmentUrl,
-  attachmentName,
+  fetchRegisteredAssets,
+  normalizeForSearch,
   clamp,
   textColorForBg,
-  type Attachment,
+  type RegisteredAsset,
 } from './common';
 
 // ============================================================
@@ -18,14 +18,6 @@ import {
 
 const BTN_ID = 'growi-custom-map-editor-fab';
 const MODAL_ID = 'growi-custom-map-editor-modal';
-
-// 表示対象にする画像拡張子
-const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'];
-const isImageName = (name: string): boolean => {
-  if (!name) return false;
-  const lower = name.toLowerCase();
-  return IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext));
-};
 
 // ============================================================
 // 編集用データモデル(表示プラグインの記法に対応)
@@ -247,40 +239,73 @@ const createModalShell = (
   return { overlay, card, body };
 };
 
-// media-library の画像一覧モーダル
+// 登録アセット(API 登録済みの地図)の一覧モーダル。
+// 設計方針: 一般ページ編集者は media-library を直接参照できないため、GUI の
+// 平面図選択は「API に登録済みの地図アセット(GET /assets)」からのみ行う。
+// media-library の生ファイルは選択肢に出さない(記法直書きも今後不許可)。
 const openImageListModal = async (): Promise<void> => {
-  const src = getDefaultStockPage();
-  const { body } = createModalShell(`画像を選択（${src}）`);
+  const { body } = createModalShell('地図を選択（登録済みアセット）');
+
+  // 変換 API(cadConvertApi)未設定だと登録アセットを取得できない。
+  if (!getCadConvertApi()) {
+    const note = document.createElement('div');
+    note.textContent = '地図アセット API（cadConvertApi）が設定されていません。管理者に設定を依頼してください。';
+    Object.assign(note.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px' });
+    body.appendChild(note);
+    return;
+  }
+
+  const info = document.createElement('div');
+  info.textContent = 'MAP 編集者が登録した地図から選びます。ここに無い図面は、MAP 編集者に登録を依頼してください。';
+  Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
+  body.appendChild(info);
+
+  // 検索ボックス(登録名・元ファイル名で絞り込み)
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = '登録名・元ファイル名で絞り込み...';
+  Object.assign(search.style, {
+    width: '100%', padding: '6px 8px', boxSizing: 'border-box', fontSize: '13px',
+    marginBottom: '10px', border: '1px solid #ccc', borderRadius: '4px',
+  });
+  body.appendChild(search);
 
   const loading = document.createElement('div');
   loading.textContent = '読み込み中...';
   Object.assign(loading.style, { color: '#666', padding: '20px', textAlign: 'center' });
   body.appendChild(loading);
 
-  let attachments: Attachment[] = [];
+  const grid = document.createElement('div');
+  Object.assign(grid.style, {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '12px',
+  });
+  body.appendChild(grid);
+
+  let assets: RegisteredAsset[] = [];
   try {
-    attachments = await getAttachmentsForPage(src);
+    // src 省略で全登録アセットを取得(登録は media-library 由来だが、一般編集者は
+    // その閲覧権限が無くても GET /assets 自体は認証不要で叩ける)。
+    assets = await fetchRegisteredAssets();
   } catch (e) {
-    console.error('[custom-map-editor] attachment fetch error', e);
+    console.error('[custom-map-editor] registered assets fetch error', e);
+    loading.remove();
+    const err = document.createElement('div');
+    err.textContent = '登録アセットの取得に失敗しました。API サーバーの稼働状況を確認してください。';
+    Object.assign(err.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px' });
+    body.appendChild(err);
+    return;
   }
   loading.remove();
 
-  const images = attachments.filter((a) => isImageName(attachmentName(a)));
-
-  if (images.length === 0) {
+  if (assets.length === 0) {
     const empty = document.createElement('div');
-    empty.textContent = `「${src}」に画像が見つかりませんでした。平面図をこのページに添付してください。`;
+    empty.textContent = '登録済みの地図がありません。MAP 編集者が「地図アセットの登録」から登録すると、ここに表示されます。';
     Object.assign(empty.style, { color: '#666', padding: '20px', textAlign: 'center' });
     body.appendChild(empty);
     return;
   }
 
-  const grid = document.createElement('div');
-  Object.assign(grid.style, {
-    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '12px',
-  });
-
-  for (const att of images) {
+  const buildCell = (asset: RegisteredAsset): HTMLElement => {
     const cell = document.createElement('button');
     cell.type = 'button';
     Object.assign(cell.style, {
@@ -290,32 +315,54 @@ const openImageListModal = async (): Promise<void> => {
     });
 
     const thumb = document.createElement('img');
-    thumb.src = attachmentUrl(att);
-    thumb.alt = attachmentName(att);
+    thumb.src = asset.imageUrl;
+    thumb.alt = asset.name;
     thumb.loading = 'lazy';
     Object.assign(thumb.style, {
       width: '100%', height: '100px', objectFit: 'contain', background: '#fff',
     });
 
     const name = document.createElement('div');
-    name.textContent = attachmentName(att);
+    name.textContent = asset.name;
     Object.assign(name.style, {
       fontSize: '12px', color: '#333', wordBreak: 'break-all', textAlign: 'center',
-      lineHeight: '1.3', maxHeight: '2.6em', overflow: 'hidden',
+      lineHeight: '1.3', maxHeight: '2.6em', overflow: 'hidden', fontFamily: 'monospace',
     });
+
+    const meta = document.createElement('div');
+    meta.textContent = asset.type === 'image' ? '画像' : `CAD / ${asset.rotate}°`;
+    Object.assign(meta.style, { fontSize: '10px', color: '#999' });
 
     cell.appendChild(thumb);
     cell.appendChild(name);
-    cell.addEventListener('click', () => openMapPreviewModal(att));
-    grid.appendChild(cell);
-  }
+    cell.appendChild(meta);
+    cell.addEventListener('click', () => openMapPreviewModal(asset));
+    return cell;
+  };
 
-  body.appendChild(grid);
+  const render = (filter: string): void => {
+    grid.innerHTML = '';
+    const kw = normalizeForSearch(filter.trim());
+    const shown = assets.filter((a) => !kw
+      || normalizeForSearch(a.name).includes(kw)
+      || normalizeForSearch(a.srcFile || '').includes(kw));
+    if (shown.length === 0) {
+      const none = document.createElement('div');
+      none.textContent = '該当する登録がありません。';
+      Object.assign(none.style, { color: '#888', padding: '12px', gridColumn: '1 / -1', textAlign: 'center', fontSize: '12px' });
+      grid.appendChild(none);
+      return;
+    }
+    for (const asset of shown) grid.appendChild(buildCell(asset));
+  };
+
+  render('');
+  search.addEventListener('input', () => render(search.value));
 };
 
-// 選んだ平面図にマーカーを配置する編集モーダル。
-const openMapPreviewModal = (att: Attachment): void => {
-  const name = attachmentName(att);
+// 選んだ登録アセットにマーカーを配置する編集モーダル。
+const openMapPreviewModal = (asset: RegisteredAsset): void => {
+  const name = asset.name; // 登録名。記法の file= にそのまま使う。
   const { body } = createModalShell(`地図を作成: ${name}`, false);
   Object.assign(body.style, { padding: '0' });
 
@@ -342,7 +389,7 @@ const openMapPreviewModal = (att: Attachment): void => {
     position: 'absolute', top: '0', left: '0', transformOrigin: '0 0', willChange: 'transform',
   });
   const img = document.createElement('img');
-  img.src = attachmentUrl(att);
+  img.src = asset.imageUrl;
   img.alt = name;
   Object.assign(img.style, { display: 'block', userSelect: 'none', pointerEvents: 'none' });
   img.draggable = false;
@@ -489,7 +536,7 @@ const openMapPreviewModal = (att: Attachment): void => {
 
     const back = document.createElement('button');
     back.type = 'button';
-    back.textContent = '← 画像一覧に戻る';
+    back.textContent = '← 地図一覧に戻る';
     Object.assign(back.style, {
       background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px',
       padding: '6px 10px', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start',

@@ -171,8 +171,11 @@ const resolveCadImageUrl = async (mapData: MapData): Promise<string | null> => {
 //   1. 登録アセット(方式Q。CAD 焼き込み SVG / 画像原本)を API 配信で最優先
 //      → ストックページ秘匿でも表示でき、閲覧者権限に依存しない
 //   2. 未登録の CAD は従来どおりその場変換
-//   3. 未登録は従来の添付解決 → 静的パス(後方互換)
-const resolveMapImageUrl = async (mapData: MapData): Promise<string> => {
+//   3. 従来の添付解決(後方互換。旧記法で直接添付を参照していたページ向け)
+// いずれでも見つからなければ null(呼び出し側で「ファイルが存在しない」旨を表示)。
+// 設計方針: 今後の地図参照は登録アセット(登録名)経由が前提。media-library の
+// 生ファイル直参照は書き間違いと同等に扱い、不在メッセージで気づけるようにする。
+const resolveMapImageUrl = async (mapData: MapData): Promise<string | null> => {
   // 1. 登録アセット優先(file が登録名なら CAD・画像とも API 配信 URL を返す)
   const registeredUrl = await resolveRegisteredAssetUrl(mapData.file, getMapCandidatePages(mapData));
   if (registeredUrl) return registeredUrl;
@@ -183,9 +186,9 @@ const resolveMapImageUrl = async (mapData: MapData): Promise<string> => {
     if (cadUrl) return cadUrl;
   }
 
-  // 3. 未登録は従来の添付解決 → 静的パス
+  // 3. 従来の添付解決(後方互換)。見つからなければ null。
   const attachmentUrl = await resolveAttachmentUrl(mapData.file, getMapCandidatePages(mapData));
-  return attachmentUrl || `/images/maps/${mapData.file}`;
+  return attachmentUrl || null;
 };
 
 // ==========================================
@@ -222,6 +225,32 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
     justifyContent: 'center', alignItems: 'center',
   });
   closeBtn.addEventListener('click', () => modal.remove());
+
+  // 平面図が解決できない(登録アセット・CAD 変換・添付のいずれにも無い)場合は、
+  // 地図を描画せず「ファイルが存在しない」旨を表示する。設計方針により、
+  // media-library の生ファイル直参照や記法の書き間違いはここで検知される。
+  if (!imageUrl) {
+    const notFound = document.createElement('div');
+    Object.assign(notFound.style, {
+      width: 'min(80vw, 640px)', padding: '8px 4px', textAlign: 'center', color: '#333',
+    });
+    const title = document.createElement('div');
+    title.textContent = '地図ファイルが見つかりません';
+    Object.assign(title.style, { fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' });
+    const detail = document.createElement('div');
+    detail.innerHTML = `指定された地図 <code style="font-family:monospace;background:#f2f2f2;padding:1px 4px;border-radius:3px;">${mapData.file}</code> が見つかりませんでした。`
+      + '<br>登録名が正しいか確認してください。登録済みの地図は、編集画面の「🗺 地図を作成」から選べます。'
+      + '<br>未登録の図面は、MAP 編集者に登録を依頼してください。';
+    Object.assign(detail.style, { fontSize: '13px', color: '#666', lineHeight: '1.7' });
+    notFound.appendChild(title);
+    notFound.appendChild(detail);
+    content.appendChild(closeBtn);
+    content.appendChild(notFound);
+    modal.appendChild(content);
+    modal.addEventListener('click', () => modal.remove());
+    document.body.appendChild(modal);
+    return;
+  }
 
   const viewport = document.createElement('div');
   Object.assign(viewport.style, {
