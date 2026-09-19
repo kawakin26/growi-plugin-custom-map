@@ -137,6 +137,70 @@ export const apiv3Get = async (
   return res.json() as Promise<Record<string, unknown>>;
 };
 
+// ページ ID(MongoDB ObjectId, 24 桁の 16 進)かどうか。
+const looksLikePageId = (s: string): boolean => /^[0-9a-f]{24}$/i.test(s);
+
+// ページ ID からページパスを取得する(ID ベース URL の環境用)。
+export const getPagePathById = async (pageId: string): Promise<string | null> => {
+  try {
+    const data = await apiv3Get('/page', { pageId });
+    const d = data as Record<string, unknown>;
+    const page = (d.page || (d.data as Record<string, unknown>)?.page || d) as
+      | Record<string, unknown>
+      | undefined;
+    const path = page?.path;
+    return typeof path === 'string' ? path : null;
+  } catch (e) {
+    console.error('[custom-map] failed to resolve page path by id', pageId, e);
+    return null;
+  }
+};
+
+// 現在ページのパス解決結果をキャッシュする(URL 単位)。
+const currentPathCache = new Map<string, Promise<string>>();
+
+// 現在表示中ページのパスを解決する。環境差を吸収する:
+//   1. window.GROWI_CONTEXT.page.path があればそれ(従来環境)
+//   2. __NEXT_DATA__ の currentPathname が「/」始まりのパスならそれ
+//   3. URL パス(location.pathname)がページ ID なら API でパス解決
+//   4. それ以外は location.pathname をそのまま返す
+// 非同期(API 解決があるため)。同一 URL の間はキャッシュする。
+export const resolveCurrentPagePath = async (): Promise<string> => {
+  const fromContext = (window as unknown as { GROWI_CONTEXT?: { page?: { path?: string } } })
+    .GROWI_CONTEXT?.page?.path;
+  if (typeof fromContext === 'string' && fromContext.startsWith('/')) {
+    return fromContext;
+  }
+
+  const rawPath = typeof location !== 'undefined' ? location.pathname : '';
+  const cached = currentPathCache.get(rawPath);
+  if (cached) return cached;
+
+  const promise = (async (): Promise<string> => {
+    // __NEXT_DATA__ の currentPathname が実パス(ID でない)ならそれを使う。
+    try {
+      const cur = (window as unknown as {
+        __NEXT_DATA__?: { props?: { pageProps?: { currentPathname?: string } } };
+      }).__NEXT_DATA__?.props?.pageProps?.currentPathname;
+      if (typeof cur === 'string' && cur.startsWith('/')) {
+        const seg = cur.replace(/^\//, '').split('/')[0] || '';
+        if (!looksLikePageId(seg)) return cur;
+      }
+    } catch { /* noop */ }
+
+    // URL パスの先頭セグメントがページ ID なら API でパス解決する。
+    const seg = rawPath.replace(/^\//, '').split('/')[0] || '';
+    if (looksLikePageId(seg)) {
+      const resolved = await getPagePathById(seg);
+      if (resolved) return resolved;
+    }
+    return rawPath;
+  })();
+
+  currentPathCache.set(rawPath, promise);
+  return promise;
+};
+
 // ページパスから、そのページ ID を取得する
 export const getPageIdByPath = async (pagePath: string): Promise<string | null> => {
   try {

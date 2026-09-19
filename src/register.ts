@@ -1,6 +1,7 @@
 import {
   getDefaultStockPage,
   getCadConvertApi,
+  resolveCurrentPagePath,
   fetchUnregisteredCads,
   fetchRegisteredAssets,
   registerCadAsset,
@@ -27,19 +28,40 @@ const MODAL_ID = 'growi-custom-map-register-modal';
 
 const ROTATE_OPTIONS = [0, 90, 180, 270];
 
-// 現在のページパスを取得する。
-const currentPagePath = (): string => (window as unknown as {
-  GROWI_CONTEXT?: { page?: { path?: string } };
-}).GROWI_CONTEXT?.page?.path || '';
+// パス末尾スラッシュの有無を吸収して比較する。
+const normPath = (p: string): string => p.replace(/\/+$/, '') || '/';
 
-// ストックページ(向き設定の対象ページ)を表示中かどうか。
-const isOnStockPage = (): boolean => {
-  const stock = getDefaultStockPage();
-  const path = currentPagePath();
-  if (!path) return false;
-  // 末尾スラッシュの有無を吸収して比較。
-  const norm = (p: string): string => p.replace(/\/+$/, '') || '/';
-  return norm(path) === norm(stock);
+// 現在ページがストックページかどうかの判定結果(非同期解決した値のキャッシュ)。
+// resolveCurrentPagePath は API 解決を含むため、解決できるまでは null。
+let onStockCache: { forUrl: string; value: boolean } | null = null;
+let resolving = false;
+
+// 非同期でストックページ判定を更新し、変化があれば onUpdate を呼ぶ。
+const refreshStockJudgement = (onUpdate: () => void): void => {
+  if (typeof location === 'undefined') return;
+  const url = location.pathname;
+  if (onStockCache && onStockCache.forUrl === url) return; // 解決済み
+  if (resolving) return;
+  resolving = true;
+  resolveCurrentPagePath()
+    .then((path) => {
+      const stock = getDefaultStockPage();
+      const value = !!path && normPath(path) === normPath(stock);
+      onStockCache = { forUrl: url, value };
+      onUpdate();
+    })
+    .catch((e) => {
+      console.warn('[custom-map-register] failed to resolve current page path', e);
+      onStockCache = { forUrl: url, value: false };
+    })
+    .finally(() => { resolving = false; });
+};
+
+// 直近の判定結果(未解決なら false)。
+const isOnStockPageCached = (): boolean => {
+  if (typeof location === 'undefined') return false;
+  if (onStockCache && onStockCache.forUrl === location.pathname) return onStockCache.value;
+  return false;
 };
 
 // ------------------------------------------------------------
@@ -475,10 +497,19 @@ const buildAssetCard = (asset: RegisteredAsset, container: HTMLElement): HTMLEle
 const ensureFab = (): void => {
   // CAD 変換 API が無ければ登録できないのでボタンを出さない。
   const apiConfigured = !!getCadConvertApi();
-  const onStock = isOnStockPage();
   const existing = document.getElementById(BTN_ID);
 
-  if (!apiConfigured || !onStock) {
+  if (!apiConfigured) {
+    if (existing) existing.remove();
+    return;
+  }
+
+  // 現在ページのパス解決は非同期(ID ベース URL 環境では API 解決が必要)。
+  // 未解決なら解決を促し、解決後の再評価で FAB を出す。
+  refreshStockJudgement(() => ensureFab());
+  const onStock = isOnStockPageCached();
+
+  if (!onStock) {
     if (existing) existing.remove();
     return;
   }
