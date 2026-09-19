@@ -1,6 +1,7 @@
 import {
   getDefaultStockPage,
   getAttachmentsForPage,
+  resolveCurrentPagePath,
   attachmentUrl,
   attachmentName,
   clamp,
@@ -815,6 +816,35 @@ const openMapPreviewModal = (att: Attachment): void => {
 // ------------------------------------------------------------
 // フローティングボタン
 // ------------------------------------------------------------
+// ストックページ(figure登録用ページ)では地図作成 FAB を出さない。
+// そこは「図面の向き設定」の作業ページで、地図記法を書く場所ではないため。
+// パス解決は非同期(ID ベース URL 環境では API 解決が必要)なのでキャッシュする。
+const normPath = (p: string): string => p.replace(/\/+$/, '') || '/';
+let onStockCache: { forUrl: string; value: boolean } | null = null;
+let stockResolving = false;
+
+const refreshStockJudgement = (onUpdate: () => void): void => {
+  if (typeof location === 'undefined') return;
+  const url = location.pathname;
+  if (onStockCache && onStockCache.forUrl === url) return;
+  if (stockResolving) return;
+  stockResolving = true;
+  resolveCurrentPagePath()
+    .then((path) => {
+      const value = !!path && normPath(path) === normPath(getDefaultStockPage());
+      onStockCache = { forUrl: url, value };
+      onUpdate();
+    })
+    .catch(() => { onStockCache = { forUrl: url, value: false }; })
+    .finally(() => { stockResolving = false; });
+};
+
+const isOnStockPageCached = (): boolean => {
+  if (typeof location === 'undefined') return false;
+  if (onStockCache && onStockCache.forUrl === location.pathname) return onStockCache.value;
+  return false;
+};
+
 const ensureFab = (): void => {
   const editing = isEditing();
   const existing = document.getElementById(BTN_ID);
@@ -823,6 +853,14 @@ const ensureFab = (): void => {
     if (existing) existing.remove();
     return;
   }
+
+  // ストックページなら地図作成ボタンを出さない(向き設定ボタンと役割分離)。
+  refreshStockJudgement(() => ensureFab());
+  if (isOnStockPageCached()) {
+    if (existing) existing.remove();
+    return;
+  }
+
   if (existing) return;
 
   const fab = document.createElement('button');
