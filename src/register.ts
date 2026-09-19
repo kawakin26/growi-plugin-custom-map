@@ -2,13 +2,16 @@ import {
   getDefaultStockPage,
   getCadConvertApi,
   resolveCurrentPagePath,
-  fetchCadFiles,
+  fetchSourceFiles,
   fetchRegisteredAssets,
-  registerCadAsset,
+  registerAsset,
   buildConvertPreviewUrl,
   normalizeForSearch,
+  attachmentUrl,
+  getAttachmentsForPage,
+  attachmentName,
   type RegisteredAsset,
-  type CadFileEntry,
+  type SourceFileEntry,
 } from './common';
 
 // ============================================================
@@ -144,7 +147,7 @@ const createModalShell = (
 // タブUI
 // ------------------------------------------------------------
 const openRegisterModal = (): void => {
-  const { body } = createModalShell('図面の向き設定（CAD）');
+  const { body } = createModalShell('地図アセットの登録（CAD・画像）');
 
   const tabBar = document.createElement('div');
   Object.assign(tabBar.style, {
@@ -191,9 +194,9 @@ const openRegisterModal = (): void => {
   selectTab('new');
 };
 
-// タブ1(図面を登録)の要素から、指定の元 CAD で登録フォームを開く。
+// タブ1(図面を登録)の要素から、指定の元ファイルで登録フォームを開く。
 // タブ2の「再登録」から呼ぶために、モジュールスコープに保持する。
-let openRegisterFormWith: ((file: string) => void) | null = null;
+let openRegisterFormWith: ((file: string, type?: 'cad' | 'image') => void) | null = null;
 
 // ------------------------------------------------------------
 // 新規登録タブ
@@ -202,11 +205,12 @@ const renderNewTab = (container: HTMLElement): void => {
   const src = getDefaultStockPage();
 
   // タブ2の再登録から呼べるよう、登録フォームを開く関数を公開する。
-  openRegisterFormWith = (file: string) => renderRegisterForm(container, file, src);
+  openRegisterFormWith = (file: string, type?: 'cad' | 'image') => renderRegisterForm(container, file, src, type);
 
   const info = document.createElement('div');
-  info.innerHTML = `「${src}」内の CAD（.dxf / .jww）から選び、向きを指定して<b>別名で登録</b>します。`
-    + '<br>同じ図面を角度違いで何個でも登録できます（登録済みには <span style="color:#20a37a;font-weight:bold;">済</span> を表示）。';
+  info.innerHTML = `「${src}」内の CAD（.dxf / .jww）・画像（.png / .jpg 等）から選び、<b>別名で登録</b>します。`
+    + '<br>CAD は向き（回転）を指定して焼き込み、画像は原本のまま保存します（画像の向きは事前に補正してください）。'
+    + '<br>同じファイルを別名で何個でも登録でき、登録済みには <span style="color:#20a37a;font-weight:bold;">済</span> を表示します。';
   Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
   container.appendChild(info);
 
@@ -229,12 +233,12 @@ const renderNewTab = (container: HTMLElement): void => {
   Object.assign(listWrap.style, { display: 'flex', flexDirection: 'column', gap: '6px' });
   container.appendChild(listWrap);
 
-  fetchCadFiles(src)
+  fetchSourceFiles(src)
     .then((files) => {
       loading.remove();
       if (files.length === 0) {
         const empty = document.createElement('div');
-        empty.textContent = `「${src}」に CAD ファイル（.dxf / .jww）が見つかりませんでした。`;
+        empty.textContent = `「${src}」に登録できる CAD・画像が見つかりませんでした。`;
         Object.assign(empty.style, { color: '#666', padding: '16px', textAlign: 'center' });
         container.appendChild(empty);
         return;
@@ -268,8 +272,8 @@ const renderNewTab = (container: HTMLElement): void => {
     });
 };
 
-// CAD 一覧の1行(登録状態で色分け・「済」バッジ)。
-const buildCadRow = (f: CadFileEntry, src: string, container: HTMLElement): HTMLElement => {
+// 登録候補一覧の1行(種別バッジ・登録状態で色分け・「済」バッジ)。
+const buildCadRow = (f: SourceFileEntry, src: string, container: HTMLElement): HTMLElement => {
   const row = document.createElement('button');
   row.type = 'button';
   Object.assign(row.style, {
@@ -279,6 +283,16 @@ const buildCadRow = (f: CadFileEntry, src: string, container: HTMLElement): HTML
     border: f.registered ? '1px solid #7fceb3' : '1px solid #ddd',
     background: f.registered ? '#eef9f3' : '#fafafa',
   });
+
+  // 種別バッジ(CAD / 画像)
+  const typeBadge = document.createElement('span');
+  const isCad = f.type === 'cad';
+  typeBadge.textContent = isCad ? 'CAD' : '画像';
+  Object.assign(typeBadge.style, {
+    flex: '0 0 auto', fontSize: '10px', fontWeight: 'bold', color: '#fff',
+    background: isCad ? '#5566cc' : '#c07820', borderRadius: '4px', padding: '2px 6px',
+  });
+  row.appendChild(typeBadge);
 
   const nameEl = document.createElement('span');
   nameEl.textContent = f.name;
@@ -296,17 +310,29 @@ const buildCadRow = (f: CadFileEntry, src: string, container: HTMLElement): HTML
     row.appendChild(badge);
   }
 
-  row.addEventListener('click', () => renderRegisterForm(container, f.name, src));
+  row.addEventListener('click', () => renderRegisterForm(container, f.name, src, f.type));
   return row;
 };
 
-// 選んだ CAD の登録フォーム(回転プレビュー + 登録名入力)。
-const renderRegisterForm = (container: HTMLElement, file: string, src: string): void => {
+// 選んだファイルの登録フォーム。CAD は回転プレビュー＋回転指定、画像は
+// 原本プレビュー＋回転なし。type 省略時は拡張子から判定する。
+const CAD_EXT = ['.dxf', '.jww'];
+const guessType = (file: string): 'cad' | 'image' => (
+  CAD_EXT.some((e) => file.toLowerCase().endsWith(e)) ? 'cad' : 'image'
+);
+
+const renderRegisterForm = (
+  container: HTMLElement,
+  file: string,
+  src: string,
+  type: 'cad' | 'image' = guessType(file),
+): void => {
   container.innerHTML = '';
+  const isCad = type === 'cad';
 
   const back = document.createElement('button');
   back.type = 'button';
-  back.textContent = '← CAD 一覧に戻る';
+  back.textContent = '← 一覧に戻る';
   Object.assign(back.style, {
     background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px',
     padding: '6px 10px', cursor: 'pointer', fontSize: '12px', marginBottom: '10px',
@@ -315,11 +341,11 @@ const renderRegisterForm = (container: HTMLElement, file: string, src: string): 
   container.appendChild(back);
 
   const title = document.createElement('div');
-  title.textContent = `元 CAD: ${file}`;
+  title.textContent = `${isCad ? '元 CAD' : '元画像'}: ${file}`;
   Object.assign(title.style, { fontWeight: 'bold', fontSize: '14px', marginBottom: '8px' });
   container.appendChild(title);
 
-  // この元 CAD の既存登録があれば注記する(再登録時の重複認識ミス防止)。
+  // この元ファイルの既存登録があれば注記する(再登録時の重複認識ミス防止)。
   const existingNote = document.createElement('div');
   Object.assign(existingNote.style, {
     fontSize: '12px', color: '#20a37a', marginBottom: '8px', display: 'none',
@@ -330,24 +356,24 @@ const renderRegisterForm = (container: HTMLElement, file: string, src: string): 
       const same = assets.filter((a) => a.srcFile === file);
       if (same.length > 0) {
         existingNote.style.display = 'block';
-        existingNote.textContent = `この図面は既に ${same.length} 件登録済みです（${
-          same.map((a) => `${a.name}:${a.rotate}°`).join(', ')
+        existingNote.textContent = `このファイルは既に ${same.length} 件登録済みです（${
+          same.map((a) => (isCad ? `${a.name}:${a.rotate}°` : a.name)).join(', ')
         }）。別名で追加登録できます。`;
       }
     })
     .catch(() => { /* 注記は任意なので失敗は無視 */ });
 
   let rotate = 0;
-  // 登録名の初期候補(元名 + 回転サフィックス)。ユーザーが編集可能。
+  // 登録名の初期候補。ユーザーが編集可能。
   const suggestName = (r: number): string => {
     const dot = file.lastIndexOf('.');
-    if (dot <= 0) return r ? `${file}_r${r}` : file;
-    const base = file.slice(0, dot);
-    const ext = file.slice(dot);
-    return r ? `${base}_r${r}${ext}` : `${base}_reg${ext}`;
+    const base = dot > 0 ? file.slice(0, dot) : file;
+    const ext = dot > 0 ? file.slice(dot) : '';
+    if (isCad) return r ? `${base}_r${r}${ext}` : `${base}_reg${ext}`;
+    return `${base}_reg${ext}`;
   };
 
-  // プレビュー画像
+  // プレビュー
   const previewWrap = document.createElement('div');
   Object.assign(previewWrap.style, {
     width: '100%', height: '320px', background: '#eee', borderRadius: '6px',
@@ -357,68 +383,89 @@ const renderRegisterForm = (container: HTMLElement, file: string, src: string): 
   const preview = document.createElement('img');
   Object.assign(preview.style, { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' });
   const previewNote = document.createElement('div');
-  previewNote.textContent = '変換プレビューを生成中...';
+  previewNote.textContent = 'プレビューを生成中...';
   Object.assign(previewNote.style, { color: '#888', fontSize: '12px' });
   previewWrap.appendChild(previewNote);
   container.appendChild(previewWrap);
 
-  const updatePreview = (): void => {
-    const url = buildConvertPreviewUrl(file, src, rotate);
-    if (!url) return;
-    previewNote.textContent = '変換プレビューを生成中...';
-    if (!previewWrap.contains(previewNote)) previewWrap.appendChild(previewNote);
-    if (previewWrap.contains(preview)) previewWrap.removeChild(preview);
-    // /convert はJSONで imageUrl を返すので、取得してから img に反映。
-    fetch(url, { headers: { Accept: 'application/json' } })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d && d.status === 'ok' && d.imageUrl) {
-          preview.src = d.imageUrl;
-          if (previewWrap.contains(previewNote)) previewWrap.removeChild(previewNote);
-          previewWrap.appendChild(preview);
-        } else {
-          previewNote.textContent = `プレビュー失敗: ${d?.message || 'unknown'}`;
-        }
-      })
-      .catch((e) => { previewNote.textContent = `プレビュー失敗: ${e.message}`; });
+  const showPreviewImg = (url: string): void => {
+    preview.src = url;
+    if (previewWrap.contains(previewNote)) previewWrap.removeChild(previewNote);
+    if (!previewWrap.contains(preview)) previewWrap.appendChild(preview);
   };
 
-  // 回転ボタン
-  const rotLabel = document.createElement('div');
-  rotLabel.textContent = '回転（登録時に焼き込む向き）';
-  Object.assign(rotLabel.style, { fontSize: '12px', color: '#333', marginBottom: '4px' });
-  container.appendChild(rotLabel);
-
-  const rotRow = document.createElement('div');
-  Object.assign(rotRow.style, { display: 'flex', gap: '6px', marginBottom: '12px' });
-  const rotBtns: { deg: number; el: HTMLButtonElement }[] = [];
-  const refreshRot = (): void => {
-    for (const b of rotBtns) {
-      const sel = b.deg === rotate;
-      Object.assign(b.el.style, {
-        background: sel ? '#0d6efd' : '#fff', color: sel ? '#fff' : '#333',
-        borderColor: sel ? '#0d6efd' : '#ccc',
-      });
+  const updatePreview = (): void => {
+    if (isCad) {
+      // CAD は API 変換結果(JSON の imageUrl)を表示。回転ごとに再取得。
+      const url = buildConvertPreviewUrl(file, src, rotate);
+      if (!url) return;
+      previewNote.textContent = '変換プレビューを生成中...';
+      if (!previewWrap.contains(previewNote)) previewWrap.appendChild(previewNote);
+      if (previewWrap.contains(preview)) previewWrap.removeChild(preview);
+      fetch(url, { headers: { Accept: 'application/json' } })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d && d.status === 'ok' && d.imageUrl) showPreviewImg(d.imageUrl);
+          else previewNote.textContent = `プレビュー失敗: ${d?.message || 'unknown'}`;
+        })
+        .catch((e) => { previewNote.textContent = `プレビュー失敗: ${e.message}`; });
+    } else {
+      // 画像は GROWI 添付の原本を直接プレビュー(登録前なので添付から解決)。
+      getAttachmentsForPage(src)
+        .then((atts) => {
+          const hit = atts.find((a) => attachmentName(a) === file);
+          if (hit) showPreviewImg(attachmentUrl(hit));
+          else previewNote.textContent = 'プレビュー画像が見つかりませんでした';
+        })
+        .catch((e) => { previewNote.textContent = `プレビュー取得失敗: ${e.message}`; });
     }
   };
-  for (const deg of ROTATE_OPTIONS) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = `${deg}°`;
-    Object.assign(b.style, {
-      flex: '1 1 0', padding: '6px 0', fontSize: '13px', cursor: 'pointer',
-      border: '1px solid #ccc', borderRadius: '4px', background: '#fff',
-    });
-    b.addEventListener('click', () => {
-      rotate = deg;
-      refreshRot();
-      nameInput.value = suggestName(deg);
-      updatePreview();
-    });
-    rotRow.appendChild(b);
-    rotBtns.push({ deg, el: b });
+
+  // 回転ボタン(CAD のみ)
+  if (isCad) {
+    const rotLabel = document.createElement('div');
+    rotLabel.textContent = '回転（登録時に焼き込む向き）';
+    Object.assign(rotLabel.style, { fontSize: '12px', color: '#333', marginBottom: '4px' });
+    container.appendChild(rotLabel);
+
+    const rotRow = document.createElement('div');
+    Object.assign(rotRow.style, { display: 'flex', gap: '6px', marginBottom: '12px' });
+    const rotBtns: { deg: number; el: HTMLButtonElement }[] = [];
+    const refreshRot = (): void => {
+      for (const b of rotBtns) {
+        const sel = b.deg === rotate;
+        Object.assign(b.el.style, {
+          background: sel ? '#0d6efd' : '#fff', color: sel ? '#fff' : '#333',
+          borderColor: sel ? '#0d6efd' : '#ccc',
+        });
+      }
+    };
+    for (const deg of ROTATE_OPTIONS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = `${deg}°`;
+      Object.assign(b.style, {
+        flex: '1 1 0', padding: '6px 0', fontSize: '13px', cursor: 'pointer',
+        border: '1px solid #ccc', borderRadius: '4px', background: '#fff',
+      });
+      b.addEventListener('click', () => {
+        rotate = deg;
+        refreshRot();
+        nameInput.value = suggestName(deg);
+        updatePreview();
+      });
+      rotRow.appendChild(b);
+      rotBtns.push({ deg, el: b });
+    }
+    container.appendChild(rotRow);
+    refreshRot();
+  } else {
+    // 画像は回転なし。向きの注意書きのみ。
+    const imgNote = document.createElement('div');
+    imgNote.textContent = '画像は回転せず原本のまま登録します（向きは画像編集ソフトで事前に補正してください）。';
+    Object.assign(imgNote.style, { fontSize: '12px', color: '#666', marginBottom: '12px' });
+    container.appendChild(imgNote);
   }
-  container.appendChild(rotRow);
 
   // 登録名入力
   const nameLabel = document.createElement('div');
@@ -438,7 +485,7 @@ const renderRegisterForm = (container: HTMLElement, file: string, src: string): 
   // 登録ボタン
   const registerBtn = document.createElement('button');
   registerBtn.type = 'button';
-  registerBtn.textContent = 'この向きで登録';
+  registerBtn.textContent = isCad ? 'この向きで登録' : 'この画像を登録';
   Object.assign(registerBtn.style, {
     width: '100%', background: '#0d6efd', color: '#fff', border: 'none',
     borderRadius: '4px', padding: '10px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold',
@@ -448,7 +495,7 @@ const renderRegisterForm = (container: HTMLElement, file: string, src: string): 
     if (!name) { showToast('登録名を入力してください', true); return; }
     registerBtn.disabled = true;
     registerBtn.textContent = '登録中...';
-    registerCadAsset({ name, file, src, rotate })
+    registerAsset({ name, file, src, rotate: isCad ? rotate : 0 })
       .then((r) => {
         showToast(`登録しました: ${r.name}（記法で file="${r.name}" と指定）`);
         container.innerHTML = '';
@@ -457,12 +504,11 @@ const renderRegisterForm = (container: HTMLElement, file: string, src: string): 
       .catch((e) => {
         showToast(`登録に失敗しました: ${e.message}`, true);
         registerBtn.disabled = false;
-        registerBtn.textContent = 'この向きで登録';
+        registerBtn.textContent = isCad ? 'この向きで登録' : 'この画像を登録';
       });
   });
   container.appendChild(registerBtn);
 
-  refreshRot();
   updatePreview();
 };
 
@@ -560,13 +606,16 @@ const buildAssetCard = (asset: RegisteredAsset, container: HTMLElement): HTMLEle
   });
 
   const meta = document.createElement('div');
-  meta.textContent = `元: ${asset.srcFile} / 回転 ${asset.rotate}°`;
+  const isImage = asset.type === 'image';
+  meta.textContent = isImage
+    ? `画像 / 元: ${asset.srcFile}`
+    : `CAD / 元: ${asset.srcFile} / 回転 ${asset.rotate}°`;
   Object.assign(meta.style, { fontSize: '11px', color: '#888' });
 
-  // 再登録: この元 CAD を「図面を登録」タブの登録フォームに引き継いで開く。
+  // 再登録: この元ファイルを「図面を登録」タブの登録フォームに引き継いで開く。
   const reReg = document.createElement('button');
   reReg.type = 'button';
-  reReg.textContent = '別角度で再登録';
+  reReg.textContent = isImage ? '別名で再登録' : '別角度で再登録';
   Object.assign(reReg.style, {
     background: '#eef4ff', color: '#0d6efd', border: '1px solid #b6d0ff', borderRadius: '4px',
     padding: '6px', cursor: 'pointer', fontSize: '12px',
@@ -578,9 +627,10 @@ const buildAssetCard = (asset: RegisteredAsset, container: HTMLElement): HTMLEle
     }
     // 「図面を登録」タブへ切り替えて、そのフォームを開く。
     // openRegisterFormWith は renderNewTab が公開する。まずタブを描画してから呼ぶ。
+    const t = asset.type === 'image' ? 'image' : 'cad';
     container.innerHTML = '';
     renderNewTab(container);
-    if (openRegisterFormWith) openRegisterFormWith(asset.srcFile);
+    if (openRegisterFormWith) openRegisterFormWith(asset.srcFile, t);
   });
 
   cell.appendChild(thumb);
@@ -617,7 +667,7 @@ const ensureFab = (): void => {
   const fab = document.createElement('button');
   fab.id = BTN_ID;
   fab.type = 'button';
-  fab.textContent = '🧭 図面の向き設定';
+  fab.textContent = '🗺 地図アセットの登録';
   Object.assign(fab.style, {
     position: 'fixed', right: '24px', bottom: '76px', zIndex: '99999',
     background: '#20a37a', color: '#fff', border: 'none', borderRadius: '24px',

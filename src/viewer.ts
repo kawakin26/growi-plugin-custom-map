@@ -4,6 +4,7 @@ import {
   getDefaultStockPage,
   getCadConvertApi,
   resolveAttachmentUrl,
+  resolveRegisteredAssetUrl,
   toNumber,
   clamp,
   textColorForBg,
@@ -166,12 +167,23 @@ const resolveCadImageUrl = async (mapData: MapData): Promise<string | null> => {
   }
 };
 
-// 地図画像の URL を解決する。
+// 地図画像の URL を解決する。解決順:
+//   1. 登録アセット(方式Q。CAD 焼き込み SVG / 画像原本)を API 配信で最優先
+//      → ストックページ秘匿でも表示でき、閲覧者権限に依存しない
+//   2. 未登録の CAD は従来どおりその場変換
+//   3. 未登録は従来の添付解決 → 静的パス(後方互換)
 const resolveMapImageUrl = async (mapData: MapData): Promise<string> => {
+  // 1. 登録アセット優先(file が登録名なら CAD・画像とも API 配信 URL を返す)
+  const registeredUrl = await resolveRegisteredAssetUrl(mapData.file, getMapCandidatePages(mapData));
+  if (registeredUrl) return registeredUrl;
+
+  // 2. 未登録の CAD はその場変換(従来動作)
   if (isCadFile(mapData.file)) {
     const cadUrl = await resolveCadImageUrl(mapData);
     if (cadUrl) return cadUrl;
   }
+
+  // 3. 未登録は従来の添付解決 → 静的パス
   const attachmentUrl = await resolveAttachmentUrl(mapData.file, getMapCandidatePages(mapData));
   return attachmentUrl || `/images/maps/${mapData.file}`;
 };

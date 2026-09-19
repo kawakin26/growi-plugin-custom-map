@@ -42,7 +42,9 @@ const getAssetsApiBase = (): string => {
 // 登録アセット1件
 export interface RegisteredAsset {
   name: string;
-  key: string;
+  key?: string;
+  file?: string;
+  ext?: string;
   type: string;
   srcFile: string;
   src: string;
@@ -51,23 +53,24 @@ export interface RegisteredAsset {
   imageUrl: string;
 }
 
-// CAD ファイル(登録状態付き)1件
-export interface CadFileEntry {
+// 登録候補ファイル(登録状態・種別付き)1件
+export interface SourceFileEntry {
   name: string;
+  type: 'cad' | 'image';
   registered: boolean;
   registeredAs: string[];
 }
 
-// ページ内の CAD ファイル一覧を登録状態付きで取得する(新規登録タブ用)。
-// 登録済みの元 CAD も除外せず返る(別名・別角度で再登録できる運用)。
-export const fetchCadFiles = async (src: string): Promise<CadFileEntry[]> => {
+// ページ内の登録候補(CAD＋画像)一覧を登録状態付きで取得する(登録タブ用)。
+// 登録済みの元ファイルも除外せず返る(別名で再登録できる運用)。
+export const fetchSourceFiles = async (src: string): Promise<SourceFileEntry[]> => {
   const base = getAssetsApiBase();
   if (!base) throw new Error('cadConvertApi is not configured');
-  const url = `${base}/cad-files?src=${encodeURIComponent(src)}`;
+  const url = `${base}/source-files?src=${encodeURIComponent(src)}`;
   const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`fetch cad files failed: ${res.status}`);
+  if (!res.ok) throw new Error(`fetch source files failed: ${res.status}`);
   const data = await res.json();
-  return Array.isArray(data?.files) ? (data.files as CadFileEntry[]) : [];
+  return Array.isArray(data?.files) ? (data.files as SourceFileEntry[]) : [];
 };
 
 // 登録済みアセット一覧を取得する(削除タブ用)。src 省略で全件。
@@ -81,10 +84,11 @@ export const fetchRegisteredAssets = async (src?: string): Promise<RegisteredAss
   return Array.isArray(data?.assets) ? (data.assets as RegisteredAsset[]) : [];
 };
 
-// CAD を別名で登録する。成功時は登録結果(imageUrl 等)を返す。
-export const registerCadAsset = async (params: {
+// CAD または画像を別名で登録する。成功時は登録結果(imageUrl 等)を返す。
+// 種別は API 側が file の拡張子で判定する(rotate は CAD のみ有効)。
+export const registerAsset = async (params: {
   name: string; file: string; src: string; rotate: number;
-}): Promise<{ imageUrl: string; name: string; rotate: number }> => {
+}): Promise<{ imageUrl: string; name: string; rotate: number; type: string }> => {
   const base = getAssetsApiBase();
   if (!base) throw new Error('cadConvertApi is not configured');
   const res = await fetch(base, {
@@ -97,7 +101,7 @@ export const registerCadAsset = async (params: {
     const msg = (data && (data as Record<string, unknown>).message) || `register failed: ${res.status}`;
     throw new Error(String(msg));
   }
-  return data as { imageUrl: string; name: string; rotate: number };
+  return data as { imageUrl: string; name: string; rotate: number; type: string };
 };
 
 // 登録アセットを削除する。
@@ -114,6 +118,50 @@ export const deleteCadAsset = async (name: string): Promise<void> => {
     const msg = (data && (data as Record<string, unknown>).message) || `delete failed: ${res.status}`;
     throw new Error(String(msg));
   }
+};
+
+// 登録アセットの解決結果キャッシュ(ページパス単位で登録一覧を1回取得)。
+const registeredAssetsCache = new Map<string, Promise<RegisteredAsset[]>>();
+
+// 指定ページの登録アセット一覧を取得(キャッシュ付き)。API 未設定や失敗時は空配列。
+const getRegisteredAssetsCached = (src: string): Promise<RegisteredAsset[]> => {
+  const key = src || '';
+  const cached = registeredAssetsCache.get(key);
+  if (cached) return cached;
+  const promise = (async (): Promise<RegisteredAsset[]> => {
+    const base = getAssetsApiBase();
+    if (!base) return [];
+    try {
+      const url = key ? `${base}?src=${encodeURIComponent(key)}` : base;
+      const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data?.assets) ? (data.assets as RegisteredAsset[]) : [];
+    } catch {
+      return [];
+    }
+  })();
+  registeredAssetsCache.set(key, promise);
+  return promise;
+};
+
+// file 名が登録アセットなら、その配信 URL を返す。未登録・API 未設定なら null。
+// src 指定ページの登録に加え、規定ストックページの登録も探索する。
+export const resolveRegisteredAssetUrl = async (
+  fileName: string,
+  candidateSrcs: string[],
+): Promise<string | null> => {
+  if (!fileName) return null;
+  const base = getAssetsApiBase();
+  if (!base) return null;
+  const srcs = Array.from(new Set([...candidateSrcs, getDefaultStockPage(), ''].filter((s) => s != null)));
+  for (const src of srcs) {
+    // eslint-disable-next-line no-await-in-loop
+    const assets = await getRegisteredAssetsCached(src);
+    const hit = assets.find((a) => a.name === fileName);
+    if (hit && hit.imageUrl) return hit.imageUrl;
+  }
+  return null;
 };
 
 // 変換 API のプレビュー用 URL を組み立てる(登録前に回転結果を確認する)。
