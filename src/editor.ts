@@ -28,13 +28,19 @@ const MODAL_ID = 'growi-custom-map-editor-modal';
 // ============================================================
 // 編集用データモデル(表示プラグインの記法に対応)
 // ============================================================
+// 1 マーカーに紐づく参考写真 1 枚。photo は添付ファイル名、desc はその写真のコメント。
+interface EditorPhoto {
+  photo: string;
+  desc: string;
+}
+
 interface EditorMarker {
   x: number;
   y: number;
   label: string;
-  photo: string;
   color: string;
-  desc: string;
+  desc: string; // マーカー全体の説明/注意(写真ごとの desc とは別)
+  photos: EditorPhoto[]; // 参考写真(0 枚以上)。記法では子リストで表現する
 }
 
 interface EditorMapSettings {
@@ -81,10 +87,18 @@ const buildCustomMapSnippet = (settings: EditorMapSettings, markers: EditorMarke
   for (const m of markers) {
     const parts: string[] = [`x=${round1(m.x)}`, `y=${round1(m.y)}`];
     if (m.label) parts.push(attrStr('label', m.label));
-    if (m.photo) parts.push(attrStr('photo', m.photo));
     if (m.color && m.color.toLowerCase() !== DEFAULT_MARKER_COLOR) parts.push(attrStr('color', m.color));
     if (m.desc) parts.push(attrStr('desc', m.desc));
     lines.push(`- ${parts.join(' ')}`);
+
+    // 参考写真は 2 スペースインデントの子リストで 1 枚 1 行。番号を使わないので
+    // 手編集での削除・挿入・並び替えが行単位で完結する。
+    for (const p of m.photos) {
+      if (!p.photo) continue;
+      const photoParts: string[] = [attrStr('photo', p.photo)];
+      if (p.desc) photoParts.push(attrStr('desc', p.desc));
+      lines.push(`  - ${photoParts.join(' ')}`);
+    }
   }
 
   lines.push(':::');
@@ -117,17 +131,37 @@ const parseAttrs = (text: string): Record<string, string> => {
 };
 
 // マーカー行(- x=.. y=.. ...)1 本を EditorMarker に変換。x/y が無ければ null。
+// photos は空で返し、後続の子リスト行を呼び出し側で push する。
+// 後方互換: 旧記法で同じ行に photo= があれば写真 1 枚として取り込む
+// (desc はマーカー説明。旧仕様では写真コメントとマーカー説明が同一だった)。
 const parseMarkerLineToEditor = (line: string): EditorMarker | null => {
   const attrs = parseAttrs(line);
   if (attrs.x == null && attrs.y == null) return null;
+  const photos: EditorPhoto[] = [];
+  if (attrs.photo) photos.push({ photo: attrs.photo, desc: attrs.desc || '' });
   return {
     x: clamp(toNumber(attrs.x, 50), 0, 100),
     y: clamp(toNumber(attrs.y, 50), 0, 100),
     label: attrs.label || '',
-    photo: attrs.photo || '',
     color: attrs.color || DEFAULT_MARKER_COLOR,
     desc: attrs.desc || '',
+    photos,
   };
+};
+
+// 写真の子リスト行(  - photo=.. desc=..)1 本を EditorPhoto に変換。photo が無ければ null。
+const parsePhotoLineToEditor = (line: string): EditorPhoto | null => {
+  const attrs = parseAttrs(line);
+  if (!attrs.photo) return null;
+  return { photo: attrs.photo, desc: attrs.desc || '' };
+};
+
+// 行頭のリストマーカー(- / * / +)より前の空白量(インデント幅)を数える。
+const listIndentWidth = (line: string): number => {
+  const m = /^([ \t]*)[-*+]\s/.exec(line);
+  if (!m) return -1; // リスト項目でない
+  // タブは 4 相当で数える(通常は半角スペース運用)。
+  return m[1].replace(/\t/g, '    ').length;
 };
 
 // 抽出した 1 ブロックを表す。raw は本文中の該当部分(置換対象)そのもの。
@@ -168,9 +202,34 @@ const extractCustomMapBlocks = (bodyText: string): CustomMapBlock[] => {
 
     const attrs = parseAttrs(open[1]);
     const markers: EditorMarker[] = [];
+
+    // まずブロック内のリスト項目行のインデント幅を調べ、最小インデントを
+    // 「マーカー行の階層」とみなす。それより深いリスト項目は写真(子)とする。
+    let baseIndent = Infinity;
     for (let k = i + 1; k < j; k += 1) {
-      const marker = parseMarkerLineToEditor(lines[k]);
-      if (marker) markers.push(marker);
+      const w = listIndentWidth(lines[k]);
+      if (w >= 0 && w < baseIndent) baseIndent = w;
+    }
+    if (!Number.isFinite(baseIndent)) baseIndent = 0;
+
+    let current: EditorMarker | null = null;
+    for (let k = i + 1; k < j; k += 1) {
+      const w = listIndentWidth(lines[k]);
+      if (w < 0) continue; // リスト項目でない行は無視
+      if (w <= baseIndent) {
+        // マーカー行(トップレベル)。
+        const marker = parseMarkerLineToEditor(lines[k]);
+        if (marker) {
+          markers.push(marker);
+          current = marker;
+        } else {
+          current = null;
+        }
+      } else if (current) {
+        // 写真行(子リスト)。直前のマーカーに紐づける。
+        const photo = parsePhotoLineToEditor(lines[k]);
+        if (photo) current.photos.push(photo);
+      }
     }
 
     const settings: EditorMapSettings = {
@@ -999,7 +1058,7 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
           window.setTimeout(() => { labelInput.focus(); labelInput.select(); }, 0);
         }
       }
-      panel.appendChild(fieldText('参考写真ファイル名 (photo)', m.photo, (v) => { m.photo = v; }));
+      panel.appendChild(photoListField(m));
       panel.appendChild(fieldColor('色 (color)', m.color, (v) => { m.color = v; renderMarkers(); }));
       panel.appendChild(fieldText('説明/注意 (desc, | で改行)', m.desc, (v) => { m.desc = v; }));
 
@@ -1207,6 +1266,126 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
     return fieldWrap(labelText, container);
   }
 
+  // 参考写真リストの編集フィールド。1 マーカーの photos 配列を追加/削除/並び替えし、
+  // 各写真のファイル名とコメントを入力する。段階 A ではファイル名指定のみ
+  // (アップロード UI は段階 B)。container の中身を rebuild で作り直す。
+  function photoListField(m: EditorMarker): HTMLElement {
+    const container = document.createElement('div');
+
+    const title = document.createElement('div');
+    title.textContent = '参考写真 (複数可)';
+    Object.assign(title.style, {
+      fontWeight: 'bold', fontSize: '13px', marginTop: '6px',
+      borderBottom: '1px solid #eee', paddingBottom: '4px', marginBottom: '6px',
+    });
+    container.appendChild(title);
+
+    const list = document.createElement('div');
+    Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '8px' });
+    container.appendChild(list);
+
+    const rebuild = (): void => {
+      list.innerHTML = '';
+      if (m.photos.length === 0) {
+        const empty = document.createElement('div');
+        empty.textContent = '写真はありません。「＋ 写真を追加」で追加できます。';
+        Object.assign(empty.style, { color: '#888', fontSize: '12px' });
+        list.appendChild(empty);
+      }
+      m.photos.forEach((p, pi) => {
+        const row = document.createElement('div');
+        Object.assign(row.style, {
+          border: '1px solid #e0e0e0', borderRadius: '5px', padding: '8px',
+          background: '#fafafa', display: 'flex', flexDirection: 'column', gap: '6px',
+        });
+
+        // ヘッダ行(番号 + 上下移動 + 削除)。
+        const head = document.createElement('div');
+        Object.assign(head.style, { display: 'flex', alignItems: 'center', gap: '4px' });
+        const no = document.createElement('div');
+        no.textContent = `写真 #${pi + 1}`;
+        Object.assign(no.style, { fontSize: '12px', fontWeight: 'bold', flex: '1 1 auto' });
+        head.appendChild(no);
+
+        const mkIconBtn = (text: string, title2: string, disabled: boolean): HTMLButtonElement => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = text;
+          b.title = title2;
+          b.disabled = disabled;
+          Object.assign(b.style, {
+            border: '1px solid #ccc', borderRadius: '4px', background: '#fff',
+            cursor: disabled ? 'not-allowed' : 'pointer', fontSize: '12px',
+            padding: '2px 7px', color: disabled ? '#bbb' : '#333',
+          });
+          return b;
+        };
+        const upBtn = mkIconBtn('↑', '上へ', pi === 0);
+        upBtn.addEventListener('click', () => {
+          if (pi === 0) return;
+          [m.photos[pi - 1], m.photos[pi]] = [m.photos[pi], m.photos[pi - 1]];
+          rebuild();
+        });
+        const downBtn = mkIconBtn('↓', '下へ', pi === m.photos.length - 1);
+        downBtn.addEventListener('click', () => {
+          if (pi === m.photos.length - 1) return;
+          [m.photos[pi + 1], m.photos[pi]] = [m.photos[pi], m.photos[pi + 1]];
+          rebuild();
+        });
+        const delBtn = mkIconBtn('✕', 'この写真を削除', false);
+        Object.assign(delBtn.style, { color: '#dc3545', borderColor: '#e2a9ad' });
+        delBtn.addEventListener('click', () => {
+          m.photos.splice(pi, 1);
+          rebuild();
+        });
+        head.appendChild(upBtn);
+        head.appendChild(downBtn);
+        head.appendChild(delBtn);
+        row.appendChild(head);
+
+        // ファイル名入力。
+        const fileInput = document.createElement('input');
+        fileInput.type = 'text';
+        fileInput.value = p.photo;
+        fileInput.placeholder = '添付ファイル名 (例: photo1.jpg)';
+        Object.assign(fileInput.style, {
+          width: '100%', padding: '4px 6px', boxSizing: 'border-box', fontSize: '12px',
+        });
+        fileInput.addEventListener('input', () => { p.photo = fileInput.value; });
+        row.appendChild(fileInput);
+
+        // コメント入力。
+        const descInput = document.createElement('input');
+        descInput.type = 'text';
+        descInput.value = p.desc;
+        descInput.placeholder = 'この写真のコメント (任意, | で改行)';
+        Object.assign(descInput.style, {
+          width: '100%', padding: '4px 6px', boxSizing: 'border-box', fontSize: '12px',
+        });
+        descInput.addEventListener('input', () => { p.desc = descInput.value; });
+        row.appendChild(descInput);
+
+        list.appendChild(row);
+      });
+    };
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.textContent = '＋ 写真を追加';
+    Object.assign(addBtn.style, {
+      marginTop: '8px', background: '#f0f0f0', border: '1px solid #ccc',
+      borderRadius: '4px', padding: '6px 10px', cursor: 'pointer', fontSize: '12px',
+    });
+    addBtn.addEventListener('click', () => {
+      m.photos.push({ photo: '', desc: '' });
+      rebuild();
+    });
+
+    rebuild();
+    container.appendChild(addBtn);
+    return container;
+  }
+
   // ---- ズーム/パン + クリックでマーカー配置 ----
   const pointers = new Map<number, { x: number; y: number }>();
   let panStartTx = 0; let panStartTy = 0; let panStartX = 0; let panStartY = 0;
@@ -1271,8 +1450,8 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
       const p = vpPoint(e.clientX, e.clientY);
       const pos = viewportToPercent(p.x, p.y);
       markers.push({
-        x: round1(pos.x), y: round1(pos.y), label: '', photo: '',
-        color: DEFAULT_MARKER_COLOR, desc: '',
+        x: round1(pos.x), y: round1(pos.y), label: '',
+        color: DEFAULT_MARKER_COLOR, desc: '', photos: [],
       });
       selected = markers.length - 1;
       renderMarkers();

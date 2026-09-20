@@ -46,14 +46,21 @@ const ensureBlinkStyle = (): void => {
 // ==========================================
 // 型定義
 // ==========================================
+// 1 マーカーに紐づく参考写真 1 枚。photo は添付ファイル名、desc はその写真のコメント。
+interface PhotoData {
+  photo: string;
+  desc: string;
+}
+
 interface MarkerData {
   x: number;
   y: number;
   label: string;
-  photo: string;
+  photo: string; // 後方互換(旧記法の単一 photo)。新記法では photos を使う
   photoSrc: string;
-  desc: string;
+  desc: string; // マーカー全体の説明/注意
   color: string;
+  photos: PhotoData[]; // 参考写真(0 枚以上)
 }
 
 interface MapData {
@@ -471,7 +478,9 @@ const createMarker = (
     transform: 'translate(-50%, -50%)',
   });
 
-  const hasDesc = !!(marker.desc && marker.desc.trim());
+  // タップで詳細(写真ギャラリー/説明)が見られる合図として点滅させる。
+  // 写真が 1 枚でもあれば、または説明があれば「詳細あり」とする。
+  const hasDetail = !!((marker.desc && marker.desc.trim()) || (marker.photos && marker.photos.length > 0));
 
   const pin = document.createElement('div');
   Object.assign(pin.style, {
@@ -480,7 +489,7 @@ const createMarker = (
     boxShadow: '0 1px 3px rgba(0,0,0,0.4)', cursor: 'pointer',
     transition: 'width 0.15s ease, height 0.15s ease, opacity 0.15s ease',
   });
-  if (hasDesc) {
+  if (hasDetail) {
     ensureBlinkStyle();
     pin.classList.add('growi-custom-map-pin-blink');
   }
@@ -511,7 +520,7 @@ const createMarker = (
   const restore = (): void => {
     minimized = false;
     Object.assign(pin.style, { width: '12px', height: '12px', borderWidth: '2px', opacity: '1' });
-    if (hasDesc) pin.classList.add('growi-custom-map-pin-blink');
+    if (hasDetail) pin.classList.add('growi-custom-map-pin-blink');
     else pin.classList.remove('growi-custom-map-pin-blink');
     if (marker.label) labelEl.style.display = '';
     if (restoreTimer) {
@@ -526,18 +535,23 @@ const createMarker = (
   };
 
   const showDetail = (): void => {
-    if (!marker.photo && !hasDesc) return;
-    if (!marker.photo) {
-      openDetailPopup('', marker.label, marker.desc);
+    const photos = marker.photos || [];
+    if (photos.length === 0 && !hasDetail) return;
+    if (photos.length === 0) {
+      // 写真なし、説明のみ。
+      openDetailPopup([], marker.label, marker.desc);
       return;
     }
-    resolveAttachmentUrl(marker.photo, getPhotoCandidatePages(mapData, marker))
-      .then((url) => {
-        openDetailPopup(url || `/images/maps/${marker.photo}`, marker.label, marker.desc);
-      })
+    const candidates = getPhotoCandidatePages(mapData, marker);
+    // 各写真の添付 URL を解決する(解決不可なら旧フォールバック /images/maps/)。
+    Promise.all(photos.map((p) => resolveAttachmentUrl(p.photo, candidates)
+      .then((url) => ({ url: url || `/images/maps/${p.photo}`, desc: p.desc }))
       .catch((err) => {
-        console.error('[custom-map] failed to resolve photo', marker.photo, err);
-        openDetailPopup(`/images/maps/${marker.photo}`, marker.label, marker.desc);
+        console.error('[custom-map] failed to resolve photo', p.photo, err);
+        return { url: `/images/maps/${p.photo}`, desc: p.desc };
+      })))
+      .then((items) => {
+        openDetailPopup(items, marker.label, marker.desc);
       });
   };
 
@@ -611,7 +625,14 @@ const createMarker = (
 // ==========================================
 // マーカー詳細のポップアップ
 // ==========================================
-const openDetailPopup = (photoUrl: string, caption: string, desc: string): void => {
+// マーカー詳細ポップアップ。複数写真をギャラリー表示し、各写真の下にその写真の
+// コメントを表示する。最後にマーカー全体の説明(markerDesc)を表示する。
+// photos が空でも markerDesc があれば説明のみ表示する。
+const openDetailPopup = (
+  photos: { url: string; desc: string }[],
+  caption: string,
+  markerDesc: string,
+): void => {
   const old = document.getElementById('growi-custom-map-photo');
   if (old) old.remove();
 
@@ -623,38 +644,67 @@ const openDetailPopup = (photoUrl: string, caption: string, desc: string): void 
     flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: '10000',
   });
 
-  if (photoUrl) {
-    const photo = document.createElement('img');
-    photo.src = photoUrl;
-    photo.alt = caption || '';
-    Object.assign(photo.style, {
-      maxWidth: '85vw', maxHeight: '75vh', borderRadius: '6px',
-      boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
-    });
-    overlay.appendChild(photo);
-  }
+  // 写真が多いときのためスクロール可能な内側コンテナに収める。
+  const scroll = document.createElement('div');
+  Object.assign(scroll.style, {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
+    maxHeight: '92vh', overflowY: 'auto', padding: '16px', boxSizing: 'border-box',
+  });
+  // 内側クリックでは閉じない(オーバーレイ余白クリックで閉じる)。
+  scroll.addEventListener('click', (e) => e.stopPropagation());
 
   if (caption) {
     const cap = document.createElement('div');
     cap.innerText = caption;
     Object.assign(cap.style, {
-      color: '#fff', marginTop: '12px', fontSize: '16px', fontWeight: 'bold',
-      textAlign: 'center',
+      color: '#fff', fontSize: '16px', fontWeight: 'bold', textAlign: 'center',
     });
-    overlay.appendChild(cap);
+    scroll.appendChild(cap);
   }
 
-  if (desc && desc.trim()) {
+  // 各写真 + その写真のコメント。
+  const single = photos.length === 1;
+  for (const p of photos) {
+    const figure = document.createElement('div');
+    Object.assign(figure.style, {
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+    });
+    if (p.url) {
+      const photo = document.createElement('img');
+      photo.src = p.url;
+      photo.alt = p.desc || caption || '';
+      Object.assign(photo.style, {
+        maxWidth: '85vw', maxHeight: single ? '70vh' : '55vh', borderRadius: '6px',
+        boxShadow: '0 10px 30px rgba(0,0,0,0.6)', objectFit: 'contain',
+      });
+      figure.appendChild(photo);
+    }
+    if (p.desc && p.desc.trim()) {
+      const cap = document.createElement('div');
+      cap.innerText = p.desc.split('|').join('\n');
+      Object.assign(cap.style, {
+        color: '#fff', fontSize: '13px', lineHeight: '1.6', textAlign: 'center',
+        whiteSpace: 'pre-wrap', maxWidth: '85vw',
+        background: 'rgba(255,255,255,0.10)', padding: '6px 12px', borderRadius: '6px',
+      });
+      figure.appendChild(cap);
+    }
+    scroll.appendChild(figure);
+  }
+
+  // マーカー全体の説明/注意。
+  if (markerDesc && markerDesc.trim()) {
     const descEl = document.createElement('div');
-    descEl.innerText = desc.split('|').join('\n');
+    descEl.innerText = markerDesc.split('|').join('\n');
     Object.assign(descEl.style, {
-      color: '#fff', marginTop: '10px', fontSize: '14px', lineHeight: '1.6',
-      textAlign: 'center', whiteSpace: 'pre-wrap', maxWidth: '85vw',
+      color: '#fff', fontSize: '14px', lineHeight: '1.6', textAlign: 'center',
+      whiteSpace: 'pre-wrap', maxWidth: '85vw',
       background: 'rgba(255,255,255,0.08)', padding: '10px 16px', borderRadius: '6px',
     });
-    overlay.appendChild(descEl);
+    scroll.appendChild(descEl);
   }
 
+  overlay.appendChild(scroll);
   overlay.addEventListener('click', () => overlay.remove());
   overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); overlay.remove(); });
   document.body.appendChild(overlay);
@@ -663,19 +713,32 @@ const openDetailPopup = (photoUrl: string, caption: string, desc: string): void 
 // ==========================================
 // remark の定義(記法 → data 属性付き div)
 // ==========================================
-const KV_REGEX = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+// editor 側 attrStr のエスケープ("→\")に対応するため、\" \' を許容して拾う。
+const KV_REGEX = /(\w+)\s*=\s*(?:"((?:\\"|[^"])*)"|'((?:\\'|[^'])*)'|(\S+))/g;
 
-const parseMarkerLine = (text: string): MarkerData | null => {
+// エスケープされた \" \' を元に戻す(editor 側 attrStr の逆)。
+const unescapeAttr = (s: string): string => s.replace(/\\(["'])/g, '$1');
+
+const parseAttrs = (text: string): Record<string, string> => {
   const attrs: Record<string, string> = {};
   let m: RegExpExecArray | null;
   KV_REGEX.lastIndex = 0;
   // eslint-disable-next-line no-cond-assign
   while ((m = KV_REGEX.exec(text)) !== null) {
     const key = m[1];
-    const val = m[2] ?? m[3] ?? m[4] ?? '';
-    attrs[key] = val;
+    const raw = m[2] ?? m[3] ?? m[4] ?? '';
+    attrs[key] = unescapeAttr(raw);
   }
+  return attrs;
+};
+
+// マーカー行を MarkerData に変換。photos は空で返し、子リストは呼び出し側で足す。
+// 後方互換: 同じ行に photo= があれば写真 1 枚として photos に取り込む。
+const parseMarkerLine = (text: string): MarkerData | null => {
+  const attrs = parseAttrs(text);
   if (attrs.x == null && attrs.y == null) return null;
+  const photos: PhotoData[] = [];
+  if (attrs.photo) photos.push({ photo: attrs.photo, desc: attrs.desc || '' });
   return {
     x: toNumber(attrs.x, 50),
     y: toNumber(attrs.y, 50),
@@ -684,7 +747,15 @@ const parseMarkerLine = (text: string): MarkerData | null => {
     photoSrc: attrs.photoSrc || attrs.photosrc || '',
     desc: attrs.desc || '',
     color: attrs.color || '#ff3b30',
+    photos,
   };
+};
+
+// 写真の子リスト行を PhotoData に変換。photo が無ければ null。
+const parsePhotoLine = (text: string): PhotoData | null => {
+  const attrs = parseAttrs(text);
+  if (!attrs.photo) return null;
+  return { photo: attrs.photo, desc: attrs.desc || '' };
 };
 
 const extractTextFromNode = (node: any): string => {
@@ -700,25 +771,71 @@ const extractTextFromNode = (node: any): string => {
   return text;
 };
 
-const collectListItems = (node: any, out: any[]): void => {
-  if (node == null) return;
-  if (node.type === 'listItem') out.push(node);
-  const children = Array.isArray(node.children) ? node.children : [];
-  for (const child of children) {
-    collectListItems(child, out);
+// custom-map ブロック直下の「最初の list」を探して、そのトップレベル listItem 群を返す。
+// これらがマーカー行。各 listItem 内にネストした list があればそれが写真(子)。
+// 従来の「全 listItem を平坦収集」だと写真行までマーカー扱いになるため、階層を保つ。
+const findTopLevelListItems = (node: any): any[] => {
+  let list: any = null;
+  const findList = (n: any): void => {
+    if (list || n == null) return;
+    if (n.type === 'list') { list = n; return; }
+    const children = Array.isArray(n.children) ? n.children : [];
+    for (const c of children) { findList(c); if (list) return; }
+  };
+  findList(node);
+  if (!list) return [];
+  return (Array.isArray(list.children) ? list.children : []).filter(
+    (c: any) => c && c.type === 'listItem',
+  );
+};
+
+// listItem の「直下 paragraph」だけのテキストを取る(ネストした子リストは含めない)。
+// マーカー行の属性はこの直下テキストにある。
+const directItemText = (listItem: any): string => {
+  const children = Array.isArray(listItem.children) ? listItem.children : [];
+  let text = '';
+  for (const c of children) {
+    if (c && c.type === 'list') continue; // 子リスト(写真)は除外
+    text += extractTextFromNode(c);
   }
+  return text.trim();
+};
+
+// listItem 内のネストした list の listItem 群(=写真行)を返す。
+const nestedPhotoItems = (listItem: any): any[] => {
+  const children = Array.isArray(listItem.children) ? listItem.children : [];
+  const out: any[] = [];
+  for (const c of children) {
+    if (c && c.type === 'list') {
+      for (const li of (Array.isArray(c.children) ? c.children : [])) {
+        if (li && li.type === 'listItem') out.push(li);
+      }
+    }
+  }
+  return out;
 };
 
 const buildMapData = (node: any): MapData => {
   const attributes = node.attributes || {};
   const markers: MarkerData[] = [];
 
-  const listItems: any[] = [];
-  collectListItems(node, listItems);
+  const listItems = findTopLevelListItems(node);
   for (const listItem of listItems) {
-    const line = extractTextFromNode(listItem).trim();
+    const line = directItemText(listItem);
     const marker = parseMarkerLine(line);
-    if (marker) markers.push(marker);
+    if (!marker) continue;
+    // ネストした子リスト行を写真として取り込む。子リストがあれば新方式なので、
+    // 旧記法互換で入れた「同一行 photo」の photos は子リスト側で上書きする。
+    const photoItems = nestedPhotoItems(listItem);
+    if (photoItems.length > 0) {
+      const photos: PhotoData[] = [];
+      for (const pi of photoItems) {
+        const photo = parsePhotoLine(directItemText(pi));
+        if (photo) photos.push(photo);
+      }
+      marker.photos = photos;
+    }
+    markers.push(marker);
   }
 
   return {
