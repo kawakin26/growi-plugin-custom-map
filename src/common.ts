@@ -403,6 +403,12 @@ export const resolveAttachmentUrl = async (
     const attachments = await getAttachmentsForPage(pagePath);
     const hit = findAttachmentUrl(attachments, fileName);
     if (hit) return hit;
+    // 見つからないときは、そのページで見えた添付名を出して原因(ファイル名不一致か
+    // ページ違いか)を切り分けやすくする。
+    console.warn(
+      `[custom-map] attachment "${fileName}" not found in page "${pagePath}". `
+      + `available: [${attachments.map((a) => a.originalName || a.fileName || a._id).join(', ')}]`,
+    );
   }
   return null;
 };

@@ -138,12 +138,15 @@ const getMapCandidatePages = (mapData: MapData): string[] => {
   return Array.from(new Set(pages));
 };
 
-// マーカー写真の候補ページ(探索順)を返す
+// マーカー写真の候補ページ(探索順)を返す。
+// 設計方針: 参考写真は「その地図記法を書いたページ」の添付として保存する運用。
+// よって現在表示中ページを最優先にし、media-library 等の地図ストックページは
+// 探索しない(そこは一般閲覧者に 403 になり得るうえ、写真の置き場所ではない)。
+// 後方互換で photoSrc(写真の格納ページ明示指定)があれば先に見る。
 const getPhotoCandidatePages = (mapData: MapData, marker: MarkerData): string[] => {
   const pages: string[] = [];
   if (marker.photoSrc) pages.push(marker.photoSrc);
   if (mapData.currentPagePath) pages.push(mapData.currentPagePath);
-  pages.push(...getMapCandidatePages(mapData));
   return Array.from(new Set(pages.filter(Boolean)));
 };
 
