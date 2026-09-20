@@ -7,6 +7,7 @@ import {
   getPageIdByPath,
   getPageBodyById,
   updatePageBody,
+  uploadAttachment,
   normalizeForSearch,
   toNumber,
   clamp,
@@ -762,10 +763,38 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
   Object.assign(body.style, { padding: '0' });
 
   // 初期値をコピーして編集用の作業データにする(呼び出し側の初期値を壊さない)。
+  // photos は配列なので、要素ごとコピーして参照共有を避ける(キャンセル時に元を汚さない)。
   const settings: EditorMapSettings = { ...opts.initialSettings };
-  const markers: EditorMarker[] = (opts.initialMarkers || []).map((m) => ({ ...m }));
+  const markers: EditorMarker[] = (opts.initialMarkers || []).map((m) => ({
+    ...m,
+    photos: (m.photos || []).map((p) => ({ ...p })),
+  }));
   const imageUrl = opts.imageUrl;
   let selected = -1;
+
+  // 参考写真のアップロード先ページ(現在ページ)を遅延解決してキャッシュする。
+  // 編集時は editContext から、新規時は resolveCurrentPageId から取得する。
+  let uploadPageInfo: { id: string; path: string } | null = null;
+  let uploadPageResolving: Promise<{ id: string; path: string } | null> | null = null;
+  const resolveUploadPage = (): Promise<{ id: string; path: string } | null> => {
+    if (uploadPageInfo) return Promise.resolve(uploadPageInfo);
+    if (uploadPageResolving) return uploadPageResolving;
+    uploadPageResolving = (async () => {
+      // 編集時: editContext の pageId を使い、パスは現在ページから解決。
+      if (opts.editContext) {
+        const path = await resolveCurrentPagePath().catch(() => '');
+        uploadPageInfo = { id: opts.editContext.pageId, path: path || '' };
+        return uploadPageInfo;
+      }
+      // 新規時: 現在ページの ID とパスを解決。
+      const id = await resolveCurrentPageId();
+      const path = await resolveCurrentPagePath().catch(() => '');
+      if (!id) return null;
+      uploadPageInfo = { id, path: path || '' };
+      return uploadPageInfo;
+    })();
+    return uploadPageResolving;
+  };
 
   const layout = document.createElement('div');
   Object.assign(layout.style, { display: 'flex', width: '100%', height: 'min(78vh, 640px)' });
@@ -1353,6 +1382,56 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
         });
         fileInput.addEventListener('input', () => { p.photo = fileInput.value; });
         row.appendChild(fileInput);
+
+        // アップロード(このページの添付として)。選択→POST→originalName を反映。
+        const upRow = document.createElement('div');
+        Object.assign(upRow.style, { display: 'flex', alignItems: 'center', gap: '6px' });
+        const upLabel = document.createElement('label');
+        upLabel.textContent = '⬆ 画像をアップロード';
+        Object.assign(upLabel.style, {
+          display: 'inline-block', background: '#eef3ff', border: '1px solid #b9ccf5',
+          color: '#0d47a1', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer',
+          fontSize: '12px', whiteSpace: 'nowrap',
+        });
+        const upInput = document.createElement('input');
+        upInput.type = 'file';
+        upInput.accept = 'image/*';
+        upInput.style.display = 'none';
+        const upStatus = document.createElement('span');
+        Object.assign(upStatus.style, { fontSize: '11px', color: '#666' });
+        upLabel.appendChild(upInput);
+        upRow.appendChild(upLabel);
+        upRow.appendChild(upStatus);
+        row.appendChild(upRow);
+
+        upInput.addEventListener('change', async () => {
+          const f = upInput.files && upInput.files[0];
+          if (!f) return;
+          upStatus.textContent = 'アップロード先ページを確認中...';
+          upLabel.style.pointerEvents = 'none';
+          upLabel.style.opacity = '0.6';
+          try {
+            const page = await resolveUploadPage();
+            if (!page) {
+              upStatus.textContent = 'ページを特定できませんでした';
+              return;
+            }
+            upStatus.textContent = 'アップロード中...';
+            const uploaded = await uploadAttachment(page.id, f, page.path);
+            p.photo = uploaded.originalName;
+            fileInput.value = uploaded.originalName;
+            upStatus.textContent = `✓ ${uploaded.originalName}`;
+            upStatus.style.color = '#207544';
+          } catch (err) {
+            console.error('[custom-map-editor] upload failed', err);
+            upStatus.textContent = `失敗: ${(err as Error).message}`;
+            upStatus.style.color = '#b00020';
+          } finally {
+            upLabel.style.pointerEvents = '';
+            upLabel.style.opacity = '';
+            upInput.value = ''; // 同じファイルを続けて選べるようにリセット
+          }
+        });
 
         // コメント入力。
         const descInput = document.createElement('input');

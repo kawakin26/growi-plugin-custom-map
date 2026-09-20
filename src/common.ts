@@ -366,6 +366,61 @@ export const getAttachmentsForPage = (pagePath: string): Promise<Attachment[]> =
   return promise;
 };
 
+// 指定ページパスの添付一覧キャッシュを無効化する(アップロード直後に呼ぶ)。
+export const invalidateAttachmentCache = (pagePath: string): void => {
+  attachmentCache.delete(pagePath);
+};
+
+// アップロード結果(記法・表示に使う項目のみ)。
+export interface UploadedAttachment {
+  id: string;
+  originalName: string; // 記法の photo= に使う元ファイル名
+  url: string; // 表示用 URL(/attachment/<id>)
+}
+
+// 画像などを現在ページの添付としてアップロードする。
+// GROWI の POST /_api/v3/attachment に multipart/form-data(file + page_id)を送る。
+// CSRF トークンは不要で Cookie(セッション)認証。X-Requested-With を付ける
+// (GROWI が XHR 判定に使う)。Content-Type は FormData 使用時ブラウザに任せる。
+// 成功時に UploadedAttachment を返し、該当ページの添付キャッシュを無効化する。
+export const uploadAttachment = async (
+  pageId: string,
+  file: File,
+  pagePathForCache?: string,
+): Promise<UploadedAttachment> => {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('page_id', pageId);
+
+  const res = await fetch('/_api/v3/attachment', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: form,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const d = data as Record<string, unknown>;
+    const errs = d.errors as Array<Record<string, unknown>> | undefined;
+    const msg = (errs && errs[0] && errs[0].message)
+      || d.message
+      || `attachment upload failed: ${res.status}`;
+    throw new Error(String(msg));
+  }
+  const data = await res.json() as Record<string, unknown>;
+  const att = data.attachment as Record<string, unknown> | undefined;
+  const id = att?._id || att?.id;
+  const originalName = att?.originalName || att?.fileName;
+  if (typeof id !== 'string' || typeof originalName !== 'string') {
+    throw new Error('attachment upload: unexpected response');
+  }
+  // アップロード先ページの添付一覧キャッシュを無効化(直後の解決で拾えるように)。
+  if (pagePathForCache) invalidateAttachmentCache(pagePathForCache);
+  const url = (typeof att?.filePathProxied === 'string' && att.filePathProxied)
+    || `/attachment/${id}`;
+  return { id, originalName, url };
+};
+
 // 現在表示中ページの添付一覧(GROWI_CONTEXT から同期取得できる分)
 const getCurrentPageAttachments = (): Attachment[] => {
   try {
