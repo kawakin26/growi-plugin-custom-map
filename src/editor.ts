@@ -734,7 +734,7 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
   left.appendChild(viewport);
 
   const hint = document.createElement('div');
-  hint.textContent = 'クリックでマーカー追加 / ホイール・ピンチで拡大 / ドラッグで移動';
+  hint.textContent = 'クリックでマーカー追加 / マーカーをドラッグで移動 / ホイール・ピンチで拡大 / 背景ドラッグで移動';
   Object.assign(hint.style, {
     position: 'absolute', left: '8px', bottom: '8px', background: 'rgba(0,0,0,0.6)',
     color: '#fff', fontSize: '11px', padding: '4px 8px', borderRadius: '4px', pointerEvents: 'none',
@@ -856,16 +856,74 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
       }
       inner.appendChild(pin);
       wrapper.appendChild(inner);
-      wrapper.addEventListener('pointerdown', (e) => e.stopPropagation());
-      wrapper.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectMarker(i);
-      });
+      attachMarkerDrag(wrapper, i);
       stage.appendChild(wrapper);
       markerEls.push(inner);
     });
     applyTransform();
   };
+
+  // マーカーのドラッグ移動。pointerdown からしきい値を超えて動いたらドラッグ扱いにし、
+  // viewportToPercent で画面座標→元画像基準の % に変換して x/y を更新する。動かず
+  // pointerup したら従来どおり選択のみ(クリック扱い)。viewport のパン/新規追加と
+  // 競合しないよう、マーカー上の pointer イベントは stopPropagation して viewport に流さない。
+  function attachMarkerDrag(wrapper: HTMLElement, index: number): void {
+    let dragging = false;
+    let movedMarker = false;
+    let startClientX = 0;
+    let startClientY = 0;
+
+    const onMove = (e: PointerEvent): void => {
+      if (!dragging) return;
+      if (!movedMarker
+        && Math.abs(e.clientX - startClientX) <= MOVE_THRESHOLD
+        && Math.abs(e.clientY - startClientY) <= MOVE_THRESHOLD) {
+        return; // しきい値未満は単純クリック候補としてまだ動かさない
+      }
+      movedMarker = true;
+      const p = vpPoint(e.clientX, e.clientY);
+      const pos = viewportToPercent(p.x, p.y);
+      const m = markers[index];
+      if (!m) return;
+      m.x = round1(pos.x);
+      m.y = round1(pos.y);
+      // 位置だけ即時反映(再生成せず該当要素を動かす)。
+      wrapper.style.left = `${m.x}%`;
+      wrapper.style.top = `${m.y}%`;
+      // 選択中マーカーなら X/Y 入力欄にも反映する。
+      if (selected === index) updateSelectedXYInputs(m.x, m.y);
+    };
+
+    const onUp = (e: PointerEvent): void => {
+      if (!dragging) return;
+      dragging = false;
+      try { wrapper.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      wrapper.removeEventListener('pointermove', onMove);
+      wrapper.removeEventListener('pointerup', onUp);
+      wrapper.removeEventListener('pointercancel', onUp);
+      if (movedMarker) {
+        // ドラッグ確定。選択枠(renderMarkers)とパネルの一覧・選択表示を最新化する。
+        selected = index;
+        renderMarkers();
+        renderPanel();
+      } else {
+        // 動いていなければ従来のクリック=選択。
+        selectMarker(index);
+      }
+    };
+
+    wrapper.addEventListener('pointerdown', (e: PointerEvent) => {
+      e.stopPropagation(); // viewport のパン/新規追加へ伝播させない
+      dragging = true;
+      movedMarker = false;
+      startClientX = e.clientX;
+      startClientY = e.clientY;
+      try { wrapper.setPointerCapture(e.pointerId); } catch { /* noop */ }
+      wrapper.addEventListener('pointermove', onMove);
+      wrapper.addEventListener('pointerup', onUp);
+      wrapper.addEventListener('pointercancel', onUp);
+    });
+  }
 
   const renderPanel = (focusLabel = false): void => {
     panel.innerHTML = '';
@@ -926,8 +984,13 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
     if (selected >= 0 && selected < markers.length) {
       const m = markers[selected];
       panel.appendChild(sectionTitle(`選択中: #${selected + 1}`));
-      panel.appendChild(fieldNumber('X (%)', m.x, (v) => { m.x = clamp(v, 0, 100); renderMarkers(); }));
-      panel.appendChild(fieldNumber('Y (%)', m.y, (v) => { m.y = clamp(v, 0, 100); renderMarkers(); }));
+      const xField = fieldNumber('X (%)', m.x, (v) => { m.x = clamp(v, 0, 100); renderMarkers(); });
+      const yField = fieldNumber('Y (%)', m.y, (v) => { m.y = clamp(v, 0, 100); renderMarkers(); });
+      // ドラッグ移動中に値を書き戻せるよう、入力要素に目印を付ける。
+      xField.querySelector('input')?.setAttribute('data-marker-x', '1');
+      yField.querySelector('input')?.setAttribute('data-marker-y', '1');
+      panel.appendChild(xField);
+      panel.appendChild(yField);
       const labelField = fieldText('ラベル (label)', m.label, (v) => { m.label = v; renderMarkers(); });
       panel.appendChild(labelField);
       if (focusLabel) {
@@ -1007,6 +1070,15 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
     selected = i;
     renderMarkers();
     renderPanel(true);
+  };
+
+  // ドラッグ移動中に、選択中マーカーの X/Y 数値入力欄へ現在値を反映する。
+  // パネル全体を再描画しないので入力中のフォーカスを奪わない。
+  const updateSelectedXYInputs = (x: number, y: number): void => {
+    const xInput = panel.querySelector<HTMLInputElement>('input[data-marker-x]');
+    const yInput = panel.querySelector<HTMLInputElement>('input[data-marker-y]');
+    if (xInput) xInput.value = String(x);
+    if (yInput) yInput.value = String(y);
   };
 
   function sectionTitle(text: string): HTMLElement {
