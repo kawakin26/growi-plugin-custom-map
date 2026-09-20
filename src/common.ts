@@ -383,6 +383,21 @@ const findAttachmentUrl = (attachments: Attachment[], fileName: string): string 
   return found ? `/attachment/${found._id}` : null;
 };
 
+// 現在ログイン中のユーザーが管理者(admin)かどうかを返す。
+// この環境では __NEXT_DATA__.props.pageProps.currentUser.admin に入る
+// (GROWI_CONTEXT 側は null のことがある)。取得できなければ false。
+// 用途: 一般ユーザーのコンソールを汚さないよう、診断ログを管理者時のみ出す。
+export const isAdminUser = (): boolean => {
+  try {
+    const user = (window as unknown as {
+      __NEXT_DATA__?: { props?: { pageProps?: { currentUser?: { admin?: boolean } } } };
+    }).__NEXT_DATA__?.props?.pageProps?.currentUser;
+    return !!(user && user.admin === true);
+  } catch {
+    return false;
+  }
+};
+
 // ファイル名を、指定した候補ページ(パス)の順で探して URL を返す。見つからなければ null。
 export const resolveAttachmentUrl = async (
   fileName: string,
@@ -404,11 +419,14 @@ export const resolveAttachmentUrl = async (
     const hit = findAttachmentUrl(attachments, fileName);
     if (hit) return hit;
     // 見つからないときは、そのページで見えた添付名を出して原因(ファイル名不一致か
-    // ページ違いか)を切り分けやすくする。
-    console.warn(
-      `[custom-map] attachment "${fileName}" not found in page "${pagePath}". `
-      + `available: [${attachments.map((a) => a.originalName || a.fileName || a._id).join(', ')}]`,
-    );
+    // ページ違いか)を切り分けやすくする。一般ユーザーのコンソールを汚さないよう
+    // 管理者ログイン時のみ出力する。
+    if (isAdminUser()) {
+      console.warn(
+        `[custom-map] attachment "${fileName}" not found in page "${pagePath}". `
+        + `available: [${attachments.map((a) => a.originalName || a.fileName || a._id).join(', ')}]`,
+      );
+    }
   }
   return null;
 };
