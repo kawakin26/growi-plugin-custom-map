@@ -743,6 +743,226 @@ interface EditContext {
   block: CustomMapBlock; // 置換対象ブロック
 }
 
+// ------------------------------------------------------------
+// 参考写真の切り抜き(矩形トリミング)モーダル。
+// アップロード前に元画像を表示し、ドラッグで矩形範囲を選択させる。
+// 範囲を選べばその領域を JPEG(画質0.9)で切り出して onDone に渡す。
+// 範囲未選択(または極小)なら元ファイルをそのまま渡す。回転なし・自由矩形・依存追加なし。
+// ------------------------------------------------------------
+const openCropModal = (file: File, onDone: (result: File) => void): void => {
+  // 写真編集モーダル(MODAL_ID)の上に重ねるため、専用オーバーレイを自前で作る
+  // (createModalShell は MODAL_ID を使い回すので下のモーダルを消してしまう)。
+  const overlay = document.createElement('div');
+  Object.assign(overlay.style, {
+    position: 'fixed', inset: '0', backgroundColor: 'rgba(0,0,0,0.6)',
+    display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: '100001',
+  });
+  const card = document.createElement('div');
+  Object.assign(card.style, {
+    position: 'relative', backgroundColor: '#fff', borderRadius: '8px',
+    width: 'min(92vw, 820px)', maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.4)', overflow: 'hidden',
+  });
+  card.addEventListener('click', (e) => e.stopPropagation());
+  const header = document.createElement('div');
+  Object.assign(header.style, {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '12px 16px', borderBottom: '1px solid #e5e5e5', flex: '0 0 auto',
+  });
+  const titleEl = document.createElement('div');
+  titleEl.textContent = '参考写真の切り抜き';
+  Object.assign(titleEl.style, { fontWeight: 'bold', fontSize: '15px' });
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.innerHTML = '&times;';
+  Object.assign(closeBtn.style, {
+    background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer',
+    lineHeight: '1', color: '#666',
+  });
+  header.appendChild(titleEl);
+  header.appendChild(closeBtn);
+  const body = document.createElement('div');
+  Object.assign(body.style, {
+    padding: '12px', overflow: 'auto', flex: '1 1 auto',
+    display: 'flex', flexDirection: 'column', gap: '10px',
+  });
+  card.appendChild(header);
+  card.appendChild(body);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  // クリーンアップ(objectUrl 解放 + オーバーレイ除去)を1箇所に集約。
+  let cleaned = false;
+  const cleanup = (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    URL.revokeObjectURL(objectUrl);
+    overlay.remove();
+  };
+  // × と背景クリックで中止(アップロードしない)。
+  closeBtn.addEventListener('click', () => cleanup());
+  overlay.addEventListener('click', () => cleanup());
+
+  const note = document.createElement('div');
+  note.textContent = '画像上をドラッグして切り抜く範囲を選びます。選ばなければ画像全体を使います。';
+  Object.assign(note.style, { fontSize: '12px', color: '#555' });
+  body.appendChild(note);
+
+  // 画像表示領域(canvas)。表示は縮小し、切り出しは元解像度で行う。
+  const stage = document.createElement('div');
+  Object.assign(stage.style, {
+    position: 'relative', width: '100%', maxHeight: '60vh', overflow: 'auto',
+    background: '#f2f2f2', display: 'flex', justifyContent: 'center', alignItems: 'center',
+  });
+  const canvas = document.createElement('canvas');
+  Object.assign(canvas.style, { display: 'block', touchAction: 'none', cursor: 'crosshair', maxWidth: '100%' });
+  stage.appendChild(canvas);
+  body.appendChild(stage);
+
+  const btnRow = document.createElement('div');
+  Object.assign(btnRow.style, { display: 'flex', gap: '8px', justifyContent: 'flex-end' });
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.textContent = '選択をクリア';
+  Object.assign(clearBtn.style, {
+    background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px',
+    padding: '8px 12px', cursor: 'pointer', fontSize: '13px',
+  });
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button';
+  okBtn.textContent = '全体をアップロード';
+  Object.assign(okBtn.style, {
+    background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px',
+    padding: '8px 14px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold',
+  });
+  btnRow.appendChild(clearBtn);
+  btnRow.appendChild(okBtn);
+  body.appendChild(btnRow);
+
+  const img = new Image();
+  const objectUrl = URL.createObjectURL(file);
+  let naturalW = 0; let naturalH = 0;
+  let dispScale = 1; // 表示canvas /元画像 の比率
+  const ctx = canvas.getContext('2d');
+
+  // 選択矩形(表示canvas座標)。null なら未選択。
+  let sel: { x: number; y: number; w: number; h: number } | null = null;
+  let dragging = false;
+  let startX = 0; let startY = 0;
+
+  const redraw = (): void => {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    if (sel && sel.w > 0 && sel.h > 0) {
+      // 選択外を暗くする。
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(0, 0, canvas.width, sel.y); // 上
+      ctx.fillRect(0, sel.y + sel.h, canvas.width, canvas.height - (sel.y + sel.h)); // 下
+      ctx.fillRect(0, sel.y, sel.x, sel.h); // 左
+      ctx.fillRect(sel.x + sel.w, sel.y, canvas.width - (sel.x + sel.w), sel.h); // 右
+      // 枠線。
+      ctx.strokeStyle = '#0d6efd';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sel.x + 1, sel.y + 1, sel.w - 2, sel.h - 2);
+    }
+  };
+
+  const updateOkLabel = (): void => {
+    okBtn.textContent = (sel && sel.w > 4 && sel.h > 4) ? 'この範囲をアップロード' : '全体をアップロード';
+  };
+
+  img.onload = (): void => {
+    naturalW = img.naturalWidth;
+    naturalH = img.naturalHeight;
+    // 表示は最大幅 720px を目安に縮小(元は切り出し時に使う)。
+    const maxW = Math.min(720, naturalW);
+    dispScale = maxW / naturalW;
+    canvas.width = Math.round(naturalW * dispScale);
+    canvas.height = Math.round(naturalH * dispScale);
+    redraw();
+  };
+  img.onerror = (): void => {
+    // 画像として読めない場合は切り抜きを諦め、そのままアップロードに回す。
+    cleanup();
+    onDone(file);
+  };
+  img.src = objectUrl;
+
+  const canvasPoint = (e: PointerEvent): { x: number; y: number } => {
+    const r = canvas.getBoundingClientRect();
+    // canvas は maxWidth:100% で表示縮小され得るので、実ピクセルへ換算する。
+    const sx = canvas.width / r.width;
+    const sy = canvas.height / r.height;
+    return {
+      x: clamp((e.clientX - r.left) * sx, 0, canvas.width),
+      y: clamp((e.clientY - r.top) * sy, 0, canvas.height),
+    };
+  };
+
+  canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+    const pt = canvasPoint(e);
+    dragging = true;
+    startX = pt.x; startY = pt.y;
+    sel = { x: startX, y: startY, w: 0, h: 0 };
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* noop */ }
+  });
+  canvas.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!dragging) return;
+    const pt = canvasPoint(e);
+    const x = Math.min(startX, pt.x);
+    const y = Math.min(startY, pt.y);
+    sel = { x, y, w: Math.abs(pt.x - startX), h: Math.abs(pt.y - startY) };
+    redraw();
+    updateOkLabel();
+  });
+  const endDrag = (e: PointerEvent): void => {
+    if (!dragging) return;
+    dragging = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    updateOkLabel();
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+
+  clearBtn.addEventListener('click', () => { sel = null; redraw(); updateOkLabel(); });
+
+  const finish = (result: File): void => {
+    cleanup();
+    onDone(result);
+  };
+
+  // 元ファイル名から JPEG の切り抜き名を作る(拡張子を .jpg に、_crop を付す)。
+  const cropName = (): string => {
+    const base = file.name.replace(/\.[^.]+$/, '');
+    return `${base}_crop.jpg`;
+  };
+
+  okBtn.addEventListener('click', () => {
+    // 範囲が極小(誤クリック等)なら全体をそのままアップロード。
+    if (!sel || sel.w <= 4 || sel.h <= 4) {
+      finish(file);
+      return;
+    }
+    // 表示canvas座標 → 元画像座標へ換算して切り出す。
+    const inv = dispScale ? 1 / dispScale : 1;
+    const sx = Math.round(sel.x * inv);
+    const sy = Math.round(sel.y * inv);
+    const sw = Math.round(sel.w * inv);
+    const sh = Math.round(sel.h * inv);
+    const out = document.createElement('canvas');
+    out.width = sw;
+    out.height = sh;
+    const octx = out.getContext('2d');
+    if (!octx) { finish(file); return; }
+    octx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    out.toBlob((blob) => {
+      if (!blob) { finish(file); return; }
+      finish(new File([blob], cropName(), { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.9);
+  });
+};
+
 // マーカー配置の編集モーダル。新規作成と既存記法の再編集で共用する。
 //   - 新規: openMapPreviewModal({ imageUrl, file }) 相当。settings/markers は初期値から。
 //   - 編集: initialSettings/initialMarkers/editContext を渡す。確定でブロック置換→保存。
@@ -1404,9 +1624,8 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
         upRow.appendChild(upStatus);
         row.appendChild(upRow);
 
-        upInput.addEventListener('change', async () => {
-          const f = upInput.files && upInput.files[0];
-          if (!f) return;
+        // 切り抜き結果(またはそのまま)をアップロードして記法へ反映する。
+        const doUpload = async (fileToUpload: File): Promise<void> => {
           upStatus.textContent = 'アップロード先ページを確認中...';
           upLabel.style.pointerEvents = 'none';
           upLabel.style.opacity = '0.6';
@@ -1417,7 +1636,7 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
               return;
             }
             upStatus.textContent = 'アップロード中...';
-            const uploaded = await uploadAttachment(page.id, f, page.path);
+            const uploaded = await uploadAttachment(page.id, fileToUpload, page.path);
             p.photo = uploaded.originalName;
             fileInput.value = uploaded.originalName;
             upStatus.textContent = `✓ ${uploaded.originalName}`;
@@ -1429,8 +1648,16 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
           } finally {
             upLabel.style.pointerEvents = '';
             upLabel.style.opacity = '';
-            upInput.value = ''; // 同じファイルを続けて選べるようにリセット
           }
+        };
+
+        upInput.addEventListener('change', () => {
+          const f = upInput.files && upInput.files[0];
+          upInput.value = ''; // 同じファイルを続けて選べるようリセット
+          if (!f) return;
+          // アップロード前に切り抜きモーダルを開く。範囲未選択なら全体、
+          // 選べばその矩形を JPEG で切り出してアップロードする。
+          openCropModal(f, (result) => { doUpload(result).catch(() => { /* 表示済み */ }); });
         });
 
         // コメント入力。
