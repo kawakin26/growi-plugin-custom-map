@@ -9,6 +9,9 @@ import {
   toNumber,
   clamp,
   textColorForBg,
+  PIN_SIZE_DEFAULT, PIN_SIZE_MIN, PIN_SIZE_MAX,
+  LABEL_SIZE_DEFAULT, LABEL_SIZE_MIN, LABEL_SIZE_MAX,
+  getMinimizedPinSize,
 } from './common';
 
 // ============================================================
@@ -72,6 +75,8 @@ interface MapData {
   scale: number;
   restore: number;
   rotate: number;
+  pinSize: number; // ピン径(px)。マップ全体共通
+  labelSize: number; // ラベル文字サイズ(px)。マップ全体共通
   markers: MarkerData[];
   currentPagePath: string;
 }
@@ -486,9 +491,19 @@ const createMarker = (
   // 写真が 1 枚でもあれば、または説明があれば「詳細あり」とする。
   const hasDetail = !!((marker.desc && marker.desc.trim()) || (marker.photos && marker.photos.length > 0));
 
+  // マップ全体で指定されたピン径・ラベル文字サイズ(px)。ラベルは下端をピンの
+  // すぐ上に置くため、ピン径に応じて bottom も調整する。
+  const pinPx = mapData.pinSize || PIN_SIZE_DEFAULT;
+  const labelPx = mapData.labelSize || LABEL_SIZE_DEFAULT;
+  const labelBottomPx = pinPx + 4; // ピンの上に少し余白を空けて配置
+  // 最小化(ラベル非表示・点滅)時のピン径。pinSize とは無関係の固定値(既定24px、
+  // GROWI_CUSTOM_MAP_CONFIG.minimizedPinSize で上書き可)。小さすぎて見失う/押しにくい
+  // のを防ぐため、通常ピンより大きめでも点滅中なので確認の妨げにならない想定。
+  const minPinPx = getMinimizedPinSize();
+
   const pin = document.createElement('div');
   Object.assign(pin.style, {
-    position: 'relative', width: '12px', height: '12px', backgroundColor: color,
+    position: 'relative', width: `${pinPx}px`, height: `${pinPx}px`, backgroundColor: color,
     border: '2px solid #fff', borderRadius: '50%',
     boxShadow: '0 1px 3px rgba(0,0,0,0.4)', cursor: 'pointer',
     transition: 'width 0.15s ease, height 0.15s ease, opacity 0.15s ease',
@@ -501,9 +516,9 @@ const createMarker = (
   const labelEl = document.createElement('div');
   labelEl.innerText = marker.label || '';
   Object.assign(labelEl.style, {
-    position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
+    position: 'absolute', bottom: `${labelBottomPx}px`, left: '50%', transform: 'translateX(-50%)',
     backgroundColor: color, color: textColorForBg(color), padding: '4px 8px', borderRadius: '4px',
-    fontSize: '12px', whiteSpace: 'nowrap', boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+    fontSize: `${labelPx}px`, whiteSpace: 'nowrap', boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
     cursor: 'pointer', userSelect: 'none', transition: 'opacity 0.15s ease',
   });
 
@@ -514,7 +529,7 @@ const createMarker = (
     minimized = true;
     ensureBlinkStyle();
     pin.classList.add('growi-custom-map-pin-blink');
-    Object.assign(pin.style, { width: '12px', height: '12px', borderWidth: '2px', opacity: '1' });
+    Object.assign(pin.style, { width: `${minPinPx}px`, height: `${minPinPx}px`, borderWidth: '2px', opacity: '1' });
     if (marker.label) labelEl.style.display = 'none';
 
     if (restoreTimer) window.clearTimeout(restoreTimer);
@@ -523,7 +538,7 @@ const createMarker = (
 
   const restore = (): void => {
     minimized = false;
-    Object.assign(pin.style, { width: '12px', height: '12px', borderWidth: '2px', opacity: '1' });
+    Object.assign(pin.style, { width: `${pinPx}px`, height: `${pinPx}px`, borderWidth: '2px', opacity: '1' });
     if (hasDetail) pin.classList.add('growi-custom-map-pin-blink');
     else pin.classList.remove('growi-custom-map-pin-blink');
     if (marker.label) labelEl.style.display = '';
@@ -868,6 +883,8 @@ const buildMapData = (node: any): MapData => {
     scale: toNumber(attributes.scale, 1),
     restore: toNumber(attributes.restore, 15),
     rotate: normalizeRotate(toNumber(attributes.rotate, 0)),
+    pinSize: clamp(toNumber(attributes.pinSize, PIN_SIZE_DEFAULT), PIN_SIZE_MIN, PIN_SIZE_MAX),
+    labelSize: clamp(toNumber(attributes.labelSize, LABEL_SIZE_DEFAULT), LABEL_SIZE_MIN, LABEL_SIZE_MAX),
     markers,
     currentPagePath: '',
   };

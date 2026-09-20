@@ -127,6 +127,8 @@ GUI を使わず、Markdown の [ディレクティブ記法](https://github.com
 | `rotate` | 平面図全体の回転角（`0` / `90` / `180` / `270` のいずれか。時計回り、度）。向きずれの補正に使う | `0` |
 | `link` | 平面図を開く起動ボタンのテキスト | `マップを開く` |
 | `restore` | 最小化したマーカーが自動で復帰するまでの時間（秒） | `15` |
+| `pinSize` | マーカーのピン径（px、マップ全体共通）。`6`〜`48` にクランプ | `12` |
+| `labelSize` | マーカーのラベル文字サイズ（px、マップ全体共通）。`8`〜`40` にクランプ | `12` |
 
 ### 各マーカーの設定（箇条書き）
 
@@ -154,7 +156,7 @@ GUI を使わず、Markdown の [ディレクティブ記法](https://github.com
 | マーカー / ラベルを右クリック・ロングタップ | 参照写真・説明文をポップアップ表示 |
 | 背景クリック / × ボタン | 閉じる |
 
-最小化したマーカーはラベルを隠し、ピンが点滅した状態になります。`restore` で指定した秒数（既定 15 秒）が経過すると自動的に元へ戻ります。
+最小化したマーカーはラベルを隠し、ピンが点滅した状態になります。このときのピン径は `pinSize` とは無関係の固定値（既定 24px、`minimizedPinSize` で変更可）で、ラベルが消えても位置が分かり押しやすいようやや大きめです。`restore` で指定した秒数（既定 15 秒）が経過すると自動的に元へ戻ります。
 
 ## 画像の準備とストック用ページ
 
@@ -185,6 +187,10 @@ window.GROWI_CUSTOM_MAP_CONFIG = {
   // CAD 変換 API のエンドポイント。CAD(.dxf/.jww)を使う場合のみ設定する。
   // 末尾は変換エンドポイント(/convert)まで含める。未設定なら CAD 機能はオフ。
   cadConvertApi: 'https://<GROWIと同じドメイン>/cad/convert',
+
+  // 最小化(ラベル非表示・点滅)状態のピン径(px)。記法の pinSize とは無関係の固定値。
+  // 省略時は 24。8〜64 にクランプ。
+  minimizedPinSize: 24,
 };
 ```
 
@@ -197,6 +203,7 @@ window.GROWI_CUSTOM_MAP_CONFIG = {
 |------|------|--------|
 | `defaultSrc` | `src` / `photoSrc` 省略時に画像を探すストックページのパス。GUI 編集の画像一覧もここを見る | `/media-library` |
 | `cadConvertApi` | CAD 変換 API の `/convert` エンドポイント URL。設定すると `.dxf` / `.jww` を変換して表示する。未設定なら CAD 機能オフ | なし |
+| `minimizedPinSize` | 最小化（ラベル非表示・点滅）状態のピン径（px）。記法の `pinSize` とは無関係の固定値。`8`〜`64` にクランプ | `24` |
 
 > [!TIP]
 > `cadConvertApi` は、変換 API を **GROWI と同じドメインのサブパス**（例 `https://gw.example.com/cad/convert`）にリバースプロキシで配置すると、CORS を気にせず使えます。設定の詳細は [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) を参照してください。

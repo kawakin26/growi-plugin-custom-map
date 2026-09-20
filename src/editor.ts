@@ -12,6 +12,8 @@ import {
   toNumber,
   clamp,
   textColorForBg,
+  PIN_SIZE_DEFAULT, PIN_SIZE_MIN, PIN_SIZE_MAX,
+  LABEL_SIZE_DEFAULT, LABEL_SIZE_MIN, LABEL_SIZE_MAX,
   type RegisteredAsset,
 } from './common';
 
@@ -53,6 +55,8 @@ interface EditorMapSettings {
   link: string;
   restore: number;
   rotate: number;
+  pinSize: number; // ピン径(px)。マップ全体共通
+  labelSize: number; // ラベル文字サイズ(px)。マップ全体共通
 }
 
 // 回転角を 0/90/180/270 のいずれかに正規化する。
@@ -81,6 +85,8 @@ const buildCustomMapSnippet = (settings: EditorMapSettings, markers: EditorMarke
   if (settings.rotate) attrs.push(`rotate="${normalizeRotate(settings.rotate)}"`);
   if (settings.link && settings.link !== 'マップを開く') attrs.push(attrStr('link', settings.link));
   if (settings.restore !== 15) attrs.push(`restore="${settings.restore}"`);
+  if (settings.pinSize !== PIN_SIZE_DEFAULT) attrs.push(`pinSize="${round1(settings.pinSize)}"`);
+  if (settings.labelSize !== LABEL_SIZE_DEFAULT) attrs.push(`labelSize="${round1(settings.labelSize)}"`);
 
   const lines: string[] = [];
   lines.push(`:::custom-map{${attrs.join(' ')}}`);
@@ -242,6 +248,8 @@ const extractCustomMapBlocks = (bodyText: string): CustomMapBlock[] => {
       link: attrs.link || 'マップを開く',
       restore: toNumber(attrs.restore, 15),
       rotate: normalizeRotate(toNumber(attrs.rotate, 0)),
+      pinSize: clamp(toNumber(attrs.pinSize, PIN_SIZE_DEFAULT), PIN_SIZE_MIN, PIN_SIZE_MAX),
+      labelSize: clamp(toNumber(attrs.labelSize, LABEL_SIZE_DEFAULT), LABEL_SIZE_MIN, LABEL_SIZE_MAX),
     };
 
     const start = lineOffsets[i];
@@ -710,6 +718,7 @@ const openImageListModal = async (): Promise<void> => {
       imageUrl: asset.imageUrl,
       initialSettings: {
         file: asset.name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
+        pinSize: PIN_SIZE_DEFAULT, labelSize: LABEL_SIZE_DEFAULT,
       },
     }));
     return cell;
@@ -1143,10 +1152,13 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
         position: 'relative', transformOrigin: 'center center',
         transform: 'translate(-50%, -50%)',
       });
+      // プレビューも実際の表示サイズ(settings.pinSize/labelSize)で描く。
+      const pinPx = settings.pinSize || PIN_SIZE_DEFAULT;
+      const labelPx = settings.labelSize || LABEL_SIZE_DEFAULT;
       const pin = document.createElement('div');
       const isSel = i === selected;
       Object.assign(pin.style, {
-        width: '14px', height: '14px', backgroundColor: m.color || DEFAULT_MARKER_COLOR,
+        width: `${pinPx}px`, height: `${pinPx}px`, backgroundColor: m.color || DEFAULT_MARKER_COLOR,
         border: isSel ? '3px solid #fff' : '2px solid #fff', borderRadius: '50%',
         boxShadow: isSel ? '0 0 0 2px #0d6efd, 0 1px 4px rgba(0,0,0,0.5)' : '0 1px 3px rgba(0,0,0,0.5)',
         cursor: 'pointer',
@@ -1155,10 +1167,10 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
         const label = document.createElement('div');
         label.textContent = m.label;
         Object.assign(label.style, {
-          position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
+          position: 'absolute', bottom: `${pinPx + 4}px`, left: '50%', transform: 'translateX(-50%)',
           backgroundColor: m.color || DEFAULT_MARKER_COLOR,
           color: textColorForBg(m.color || DEFAULT_MARKER_COLOR), padding: '2px 6px',
-          borderRadius: '4px', fontSize: '11px', whiteSpace: 'nowrap', pointerEvents: 'none',
+          borderRadius: '4px', fontSize: `${labelPx}px`, whiteSpace: 'nowrap', pointerEvents: 'none',
         });
         inner.appendChild(label);
       }
@@ -1266,6 +1278,35 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
       renderMarkers();
       renderPanel();
     }));
+
+    // ピン・ラベルのサイズ(px)。マップ全体共通。範囲でクランプして画面崩れを防ぐ。
+    const pinField = fieldNumber(
+      `ピンサイズ px (${PIN_SIZE_MIN}〜${PIN_SIZE_MAX})`,
+      settings.pinSize,
+      (v) => { settings.pinSize = clamp(v, PIN_SIZE_MIN, PIN_SIZE_MAX); renderMarkers(); },
+    );
+    panel.appendChild(pinField);
+    const labelField = fieldNumber(
+      `ラベル文字サイズ px (${LABEL_SIZE_MIN}〜${LABEL_SIZE_MAX})`,
+      settings.labelSize,
+      (v) => { settings.labelSize = clamp(v, LABEL_SIZE_MIN, LABEL_SIZE_MAX); renderMarkers(); },
+    );
+    panel.appendChild(labelField);
+    // 既定値に戻すボタン。
+    const resetSize = document.createElement('button');
+    resetSize.type = 'button';
+    resetSize.textContent = 'ピン・ラベルサイズを既定値に戻す';
+    Object.assign(resetSize.style, {
+      background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px',
+      padding: '5px 10px', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start',
+    });
+    resetSize.addEventListener('click', () => {
+      settings.pinSize = PIN_SIZE_DEFAULT;
+      settings.labelSize = LABEL_SIZE_DEFAULT;
+      renderMarkers();
+      renderPanel();
+    });
+    panel.appendChild(resetSize);
 
     panel.appendChild(sectionTitle(`マーカー一覧 (${markers.length})`));
     if (markers.length === 0) {

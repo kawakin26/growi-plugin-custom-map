@@ -499,6 +499,31 @@ export const toNumber = (value: string | null | undefined, fallback: number): nu
 
 export const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
 
+// マーカーのピン径・ラベル文字サイズ(px)の既定値と範囲(画面崩れ防止のクランプ用)。
+// viewer(描画)と editor(記法生成/パース/UI)で共有する。
+export const PIN_SIZE_DEFAULT = 12;
+export const PIN_SIZE_MIN = 6;
+export const PIN_SIZE_MAX = 48;
+export const LABEL_SIZE_DEFAULT = 12;
+export const LABEL_SIZE_MIN = 8;
+export const LABEL_SIZE_MAX = 40;
+
+// 最小化(ラベル非表示・点滅)状態のピン径(px)。ユーザー指定の pinSize とは
+// 無関係の固定値。ラベルが消えても場所が分かりクリックしやすいよう既定は
+// やや大きめ。window.GROWI_CUSTOM_MAP_CONFIG.minimizedPinSize で上書き可能。
+export const MINIMIZED_PIN_SIZE_DEFAULT = 24;
+const MINIMIZED_PIN_SIZE_MIN = 8;
+const MINIMIZED_PIN_SIZE_MAX = 64;
+
+// 最小化ピン径を返す。設定があれば範囲内にクランプ、無ければ既定 24px。
+export const getMinimizedPinSize = (): number => {
+  const cfg = (window as unknown as { GROWI_CUSTOM_MAP_CONFIG?: { minimizedPinSize?: number } })
+    .GROWI_CUSTOM_MAP_CONFIG;
+  const raw = cfg && typeof cfg.minimizedPinSize === 'number' ? cfg.minimizedPinSize : NaN;
+  if (!Number.isFinite(raw)) return MINIMIZED_PIN_SIZE_DEFAULT;
+  return Math.min(MINIMIZED_PIN_SIZE_MAX, Math.max(MINIMIZED_PIN_SIZE_MIN, raw));
+};
+
 // 検索照合用に文字列を正規化する。NFKC で全角英数字・記号を半角に統一し、
 // 小文字化する。これで「ＡＢＣ」と「abc」を区別せず絞り込める。
 export const normalizeForSearch = (s: string): string => {
