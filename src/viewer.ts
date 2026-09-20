@@ -5,6 +5,7 @@ import {
   getCadConvertApi,
   resolveAttachmentUrl,
   resolveRegisteredAssetUrl,
+  resolveCurrentPagePath,
   toNumber,
   clamp,
   textColorForBg,
@@ -537,7 +538,7 @@ const createMarker = (
     else minimize();
   };
 
-  const showDetail = (): void => {
+  const showDetail = async (): Promise<void> => {
     const photos = marker.photos || [];
     if (photos.length === 0 && !hasDetail) return;
     if (photos.length === 0) {
@@ -545,13 +546,21 @@ const createMarker = (
       openDetailPopup([], marker.label, marker.desc);
       return;
     }
+    // ID ベース URL 環境では GROWI_CONTEXT が無く currentPagePath が空のことが
+    // ある。参考写真は現在ページの添付なので、ここで環境差を吸収して解決する。
+    if (!mapData.currentPagePath) {
+      try {
+        mapData.currentPagePath = await resolveCurrentPagePath();
+      } catch { /* noop */ }
+    }
     const candidates = getPhotoCandidatePages(mapData, marker);
-    // 各写真の添付 URL を解決する(解決不可なら旧フォールバック /images/maps/)。
+    // 各写真の添付 URL を解決する。解決できない写真は url 空で返し、
+    // ポップアップ側で「画像を表示できません」プレースホルダを出す。
     Promise.all(photos.map((p) => resolveAttachmentUrl(p.photo, candidates)
-      .then((url) => ({ url: url || `/images/maps/${p.photo}`, desc: p.desc }))
+      .then((url) => ({ url: url || '', desc: p.desc, name: p.photo }))
       .catch((err) => {
         console.error('[custom-map] failed to resolve photo', p.photo, err);
-        return { url: `/images/maps/${p.photo}`, desc: p.desc };
+        return { url: '', desc: p.desc, name: p.photo };
       })))
       .then((items) => {
         openDetailPopup(items, marker.label, marker.desc);
@@ -562,7 +571,7 @@ const createMarker = (
     elForActions.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      showDetail();
+      showDetail().catch((err) => console.error('[custom-map] showDetail error', err));
     });
 
     let longPressTimer: number | undefined;
@@ -579,7 +588,7 @@ const createMarker = (
         if (longPressTimer) window.clearTimeout(longPressTimer);
         longPressTimer = window.setTimeout(() => {
           longPressed = true;
-          showDetail();
+          showDetail().catch((err) => console.error('[custom-map] showDetail error', err));
         }, 500);
       }
     });
@@ -632,7 +641,7 @@ const createMarker = (
 // コメントを表示する。最後にマーカー全体の説明(markerDesc)を表示する。
 // photos が空でも markerDesc があれば説明のみ表示する。
 const openDetailPopup = (
-  photos: { url: string; desc: string }[],
+  photos: { url: string; desc: string; name?: string }[],
   caption: string,
   markerDesc: string,
 ): void => {
@@ -681,6 +690,16 @@ const openDetailPopup = (
         boxShadow: '0 10px 30px rgba(0,0,0,0.6)', objectFit: 'contain',
       });
       figure.appendChild(photo);
+    } else {
+      // 添付が解決できなかった。壊れた画像アイコンではなく明示メッセージを出す。
+      const ph = document.createElement('div');
+      ph.innerText = `画像を表示できません${p.name ? `\n(${p.name})` : ''}`;
+      Object.assign(ph.style, {
+        color: '#ddd', fontSize: '13px', textAlign: 'center', whiteSpace: 'pre-wrap',
+        border: '1px dashed rgba(255,255,255,0.4)', borderRadius: '6px',
+        padding: '24px 28px', background: 'rgba(255,255,255,0.06)',
+      });
+      figure.appendChild(ph);
     }
     if (p.desc && p.desc.trim()) {
       const cap = document.createElement('div');
