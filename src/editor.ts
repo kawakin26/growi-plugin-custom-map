@@ -1913,7 +1913,7 @@ const ensureFab = (): void => {
   const editFab = document.createElement('button');
   editFab.id = EDIT_BTN_ID;
   editFab.type = 'button';
-  editFab.textContent = '✏️ 地図を編集';
+  editFab.textContent = '🖊️ 地図を編集';
   Object.assign(editFab.style, {
     position: 'fixed', right: '24px', bottom: '104px', zIndex: '99999',
     background: '#f0ad00', color: '#1f1300', border: 'none', borderRadius: '24px',
