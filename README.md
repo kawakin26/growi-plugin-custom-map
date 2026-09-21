@@ -198,7 +198,9 @@ window.GROWI_CUSTOM_MAP_CONFIG = {
 
   // CAD 変換 API のエンドポイント。CAD(.dxf/.jww)を使う場合のみ設定する。
   // 末尾は変換エンドポイント(/convert)まで含める。未設定なら CAD 機能はオフ。
-  cadConvertApi: 'https://<GROWIと同じドメイン>/cad/convert',
+  // ※ API サーバーが未導入・停止中のときは、この行を設定しない(または下のように
+  //   コメントアウトする)こと。設定だけ残すと動作が不安定になる(下の注意書き参照)。
+  // cadConvertApi: 'https://<GROWIと同じドメイン>/cad/convert',
 
   // 最小化(ラベル非表示・点滅)状態のピン径(px)。記法の pinSize とは無関係の固定値。
   // 省略時は 24。8〜64 にクランプ。
@@ -219,6 +221,14 @@ window.GROWI_CUSTOM_MAP_CONFIG = {
 
 > [!TIP]
 > `cadConvertApi` は、変換 API を **GROWI と同じドメインのサブパス**（例 `https://gw.example.com/cad/convert`）にリバースプロキシで配置すると、CORS を気にせず使えます。設定の詳細は [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) を参照してください。
+
+> [!WARNING]
+> **変換 API サーバーが未導入または停止中のときは、`cadConvertApi` を設定しない（設定行をコメントアウトする）でください。**
+>
+> `cadConvertApi` を設定すると、プラグインは「登録アセット経由の表示」「地図を作成／編集での登録アセット一覧」など、API があることを前提とした動作に切り替わります。この状態で API サーバーが停止していると、画像の解決に失敗して地図が表示されない、一覧が取得できないなど、動作が不安定になります。
+>
+> - **CAD を使わないお手軽運用**、または **API サーバーを止めているとき**は、`cadConvertApi` を設定しない（またはコメントアウトする）でください。この場合、プラグインは自動的に「ストックページ（既定 `/media-library`）の添付画像を直接参照する」お手軽運用モードで動きます（地図の作成・表示・編集とも添付画像で完結します）。
+> - API サーバーを導入・稼働させたうえで CAD 変換や登録アセット配信を使いたいときのみ、`cadConvertApi` を設定してください。
 
 ## CAD 図面の利用（任意）
 
