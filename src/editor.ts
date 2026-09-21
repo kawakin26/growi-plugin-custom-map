@@ -1889,7 +1889,7 @@ const ensureFab = (): void => {
   const fab = document.createElement('button');
   fab.id = BTN_ID;
   fab.type = 'button';
-  fab.textContent = '🗺 地図を作成';
+  fab.textContent = '🛠️ 地図を作成';
   Object.assign(fab.style, {
     position: 'fixed', right: '24px', bottom: '56px', zIndex: '99999',
     background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '24px',
@@ -1913,10 +1913,10 @@ const ensureFab = (): void => {
   const editFab = document.createElement('button');
   editFab.id = EDIT_BTN_ID;
   editFab.type = 'button';
-  editFab.textContent = '🗺 地図を編集';
+  editFab.textContent = '✏️ 地図を編集';
   Object.assign(editFab.style, {
     position: 'fixed', right: '24px', bottom: '104px', zIndex: '99999',
-    background: '#20a37a', color: '#fff', border: 'none', borderRadius: '24px',
+    background: '#f0ad00', color: '#1f1300', border: 'none', borderRadius: '24px',
     padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
     boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
   });
