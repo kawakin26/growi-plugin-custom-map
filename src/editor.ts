@@ -4,6 +4,7 @@ import {
   resolveCurrentPagePath,
   fetchRegisteredAssets,
   resolveRegisteredAssetUrl,
+  resolveAttachmentUrl,
   getPageIdByPath,
   getPageBodyById,
   updatePageBody,
@@ -599,12 +600,25 @@ const resolveCurrentPageId = async (): Promise<string | null> => {
   return getPageIdByPath(path);
 };
 
+// 編集プレビュー用の画像 URL 解決。viewer の resolveMapImageUrl と方針をそろえ、
+// 1.登録アセット(API 配信) → 2.ページ添付の直参照 の順で解決する。
+// (編集プレビューに未登録 CAD のその場変換は不要なので省略している)
+const resolveMapImageUrlForEdit = async (
+  file: string,
+  candidatePages: string[],
+): Promise<string | null> => {
+  const registeredUrl = await resolveRegisteredAssetUrl(file, candidatePages);
+  if (registeredUrl) return registeredUrl;
+  const attachmentUrlResolved = await resolveAttachmentUrl(file, candidatePages);
+  return attachmentUrlResolved || null;
+};
+
 // ------------------------------------------------------------
 // 「地図を編集」モーダル: ページ本文中の :::custom-map ブロックを一覧表示し、
 // 選んで再編集する。本文は保存済みリビジョン(GET /_api/v3/page)から取得し、
 // 確定時に該当ブロックだけ差し替えて保存(PUT)する。
-// 設計: 一般編集者は登録アセット経由のみ。旧生ファイル名の記法は解決できない
-// ため、その旨を表示して編集不可にする(新方式で入れ直す運用)。
+// 設計: 登録アセット経由と、お手軽運用の添付直参照の両方を編集できる。
+// どちらでも画像が解決できない記法(書き間違い・未添付)のみ編集不可にする。
 // ------------------------------------------------------------
 const openEditListModal = async (): Promise<void> => {
   const { body } = createModalShell('地図を編集（このページ内の地図）');
@@ -704,8 +718,11 @@ const openEditListModal = async (): Promise<void> => {
 
     grid.appendChild(cell);
 
-    // 登録アセットの imageUrl を解決してプレビュー＋編集可否を決める。
-    resolveRegisteredAssetUrl(block.settings.file, [pageBody.path, getDefaultStockPage()])
+    // 地図画像 URL を解決してプレビュー＋編集可否を決める。
+    // viewer と同じく多段解決: 1.登録アセット(API配信) → 2.ページ添付の直参照。
+    // お手軽運用(API 未設定)で作成した添付直参照の地図も編集できるようにする。
+    const candidatePages = [pageBody.path, getDefaultStockPage()];
+    resolveMapImageUrlForEdit(block.settings.file, candidatePages)
       .then((url) => {
         if (url) {
           thumbNote.remove();
@@ -725,13 +742,13 @@ const openEditListModal = async (): Promise<void> => {
             });
           });
         } else {
-          // 登録アセットでない(旧生ファイル名など)。編集対象外にする。
-          thumbNote.textContent = '登録アセットではありません';
+          // 登録アセットにも添付にも見つからない(記法の書き間違い・未添付など)。
+          thumbNote.textContent = '画像が見つかりません';
           editBtn.disabled = true;
           Object.assign(editBtn.style, { background: '#ccc', cursor: 'not-allowed' });
           editBtn.textContent = '編集できません';
           const hint = document.createElement('div');
-          hint.textContent = 'この地図は登録アセットではないため編集できません。新方式で登録・作成し直してください。';
+          hint.textContent = 'この地図の画像が見つかりませんでした。file 名や、画像を置いたページ（既定 media-library）を確認してください。';
           Object.assign(hint.style, { fontSize: '10px', color: '#b00020', lineHeight: '1.4' });
           cell.appendChild(hint);
         }
