@@ -669,7 +669,7 @@ const ensureFab = (): void => {
   fab.type = 'button';
   fab.textContent = '🗺 地図アセットの登録';
   Object.assign(fab.style, {
-    position: 'fixed', right: '24px', bottom: '76px', zIndex: '99999',
+    position: 'fixed', right: '24px', bottom: '56px', zIndex: '99999',
     background: '#20a37a', color: '#fff', border: 'none', borderRadius: '24px',
     padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
     boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
