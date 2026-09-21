@@ -1,5 +1,6 @@
 import {
   getDefaultStockPage,
+  isStockAreaPath,
   getCadConvertApi,
   resolveCurrentPagePath,
   fetchRegisteredAssets,
@@ -1970,8 +1971,8 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
 // ------------------------------------------------------------
 // ストックページ(figure登録用ページ)では地図作成 FAB を出さない。
 // そこは「図面の向き設定」の作業ページで、地図記法を書く場所ではないため。
+// ストックページ配下を含む判定は common.ts の isStockAreaPath を使う。
 // パス解決は非同期(ID ベース URL 環境では API 解決が必要)なのでキャッシュする。
-const normPath = (p: string): string => p.replace(/\/+$/, '') || '/';
 let onStockCache: { forUrl: string; value: boolean } | null = null;
 let stockResolving = false;
 
@@ -1983,7 +1984,7 @@ const refreshStockJudgement = (onUpdate: () => void): void => {
   stockResolving = true;
   resolveCurrentPagePath()
     .then((path) => {
-      const value = !!path && normPath(path) === normPath(getDefaultStockPage());
+      const value = !!path && isStockAreaPath(path);
       onStockCache = { forUrl: url, value };
       onUpdate();
     })

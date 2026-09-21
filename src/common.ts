@@ -5,11 +5,26 @@
 // 規定のストック用ページ。window.GROWI_CUSTOM_MAP_CONFIG.defaultSrc で上書き可能。
 const DEFAULT_STOCK_PAGE = '/media-library';
 
+// ページパスの末尾スラッシュを除去して比較・API呼び出しに使う。
+export const normalizePagePath = (path: string): string => {
+  const value = String(path || '').trim();
+  if (value === '/' || value === '') return value;
+  return value.replace(/\/+$/, '');
+};
+
 export const getDefaultStockPage = (): string => {
   const cfg = (window as unknown as { GROWI_CUSTOM_MAP_CONFIG?: { defaultSrc?: string } })
     .GROWI_CUSTOM_MAP_CONFIG;
   const v = cfg && typeof cfg.defaultSrc === 'string' ? cfg.defaultSrc.trim() : '';
   return v || DEFAULT_STOCK_PAGE;
+};
+
+// ストックページ自身、またはその配下のページかどうかを判定する。
+export const isStockAreaPath = (path: string, stockPath = getDefaultStockPage()): boolean => {
+  const pathValue = normalizePagePath(path);
+  const stockValue = normalizePagePath(stockPath);
+  if (!pathValue || !stockValue) return false;
+  return pathValue === stockValue || pathValue.startsWith(`${stockValue}/`);
 };
 
 // CAD 変換 API のエンドポイント。window.GROWI_CUSTOM_MAP_CONFIG.cadConvertApi で設定。
@@ -56,6 +71,8 @@ export interface RegisteredAsset {
 // 登録候補ファイル(登録状態・種別付き)1件
 export interface SourceFileEntry {
   name: string;
+  // deep 検索時は、実際に添付が存在するページのパス。
+  src?: string;
   type: 'cad' | 'image';
   registered: boolean;
   registeredAs: string[];
@@ -198,6 +215,40 @@ export const apiv3Get = async (
   });
   if (!res.ok) throw new Error(`apiv3 GET failed: ${url} (${res.status})`);
   return res.json() as Promise<Record<string, unknown>>;
+};
+
+// 指定ページ直下の子ページを取得する。GROWI の pages/list は子孫を返すため、
+// 親自身と孫以下を除外して、フォルダブラウザ用の直下ページだけに絞る。
+export const listChildPages = async (parentPath: string): Promise<string[]> => {
+  const parent = normalizePagePath(parentPath);
+  if (!parent) return [];
+
+  const pages: string[] = [];
+  let offset = 0;
+  const limit = 100;
+  for (let i = 0; i < 1000; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const data = await apiv3Get('/pages/list', {
+      path: parent,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const rawPages = Array.isArray(data.pages) ? data.pages : [];
+    for (const raw of rawPages) {
+      const page = raw as Record<string, unknown>;
+      if (typeof page.path === 'string') pages.push(normalizePagePath(page.path));
+    }
+    const total = Number(data.totalCount || 0);
+    offset += rawPages.length;
+    if (rawPages.length === 0 || (total > 0 && offset >= total)) break;
+    if (rawPages.length < limit && total <= 0) break;
+  }
+
+  const prefix = `${parent}/`;
+  return Array.from(new Set(pages))
+    .filter((path) => path !== parent && path.startsWith(prefix))
+    .filter((path) => !path.slice(prefix.length).includes('/'))
+    .sort();
 };
 
 // ページ ID(MongoDB ObjectId, 24 桁の 16 進)かどうか。

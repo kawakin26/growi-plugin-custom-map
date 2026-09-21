@@ -1,5 +1,8 @@
 import {
   getDefaultStockPage,
+  isStockAreaPath,
+  normalizePagePath,
+  listChildPages,
   getCadConvertApi,
   resolveCurrentPagePath,
   fetchSourceFiles,
@@ -32,10 +35,7 @@ const MODAL_ID = 'growi-custom-map-register-modal';
 
 const ROTATE_OPTIONS = [0, 90, 180, 270];
 
-// パス末尾スラッシュの有無を吸収して比較する。
-const normPath = (p: string): string => p.replace(/\/+$/, '') || '/';
-
-// 現在ページがストックページかどうかの判定結果(非同期解決した値のキャッシュ)。
+// 現在ページがストック領域かどうかの判定結果(非同期解決した値のキャッシュ)。
 // resolveCurrentPagePath は API 解決を含むため、解決できるまでは null。
 let onStockCache: { forUrl: string; value: boolean } | null = null;
 let resolving = false;
@@ -49,8 +49,7 @@ const refreshStockJudgement = (onUpdate: () => void): void => {
   resolving = true;
   resolveCurrentPagePath()
     .then((path) => {
-      const stock = getDefaultStockPage();
-      const value = !!path && normPath(path) === normPath(stock);
+      const value = !!path && isStockAreaPath(path);
       onStockCache = { forUrl: url, value };
       onUpdate();
     })
@@ -146,8 +145,25 @@ const createModalShell = (
 // ------------------------------------------------------------
 // タブUI
 // ------------------------------------------------------------
-const openRegisterModal = (): void => {
+const openRegisterModal = async (): Promise<void> => {
   const { body } = createModalShell('地図アセットの登録（CAD・画像）');
+  let browseSrc = normalizePagePath(getDefaultStockPage());
+  let activeTab: 'new' | 'list' = 'new';
+
+  // 現在ページがストック領域なら、そのページを初期表示する。
+  try {
+    const currentPath = await resolveCurrentPagePath();
+    if (isStockAreaPath(currentPath)) browseSrc = normalizePagePath(currentPath);
+  } catch {
+    // 解決できない場合は既定ストックページから開始する。
+  }
+
+  const navigation = document.createElement('div');
+  Object.assign(navigation.style, {
+    padding: '10px 12px', marginBottom: '12px', background: '#f5f8fa',
+    border: '1px solid #dbe3e8', borderRadius: '6px', fontSize: '12px',
+  });
+  body.appendChild(navigation);
 
   const tabBar = document.createElement('div');
   Object.assign(tabBar.style, {
@@ -169,6 +185,7 @@ const openRegisterModal = (): void => {
   const tabList = mkTab('登録済み一覧');
 
   const selectTab = (which: 'new' | 'list'): void => {
+    activeTab = which;
     for (const t of [tabNew, tabList]) {
       t.style.borderBottomColor = 'transparent';
       t.style.color = '#555';
@@ -179,8 +196,77 @@ const openRegisterModal = (): void => {
     active.style.color = '#0d6efd';
     active.style.fontWeight = 'bold';
     content.innerHTML = '';
-    if (which === 'new') renderNewTab(content);
-    else renderListTab(content);
+    if (which === 'new') renderNewTab(content, browseSrc);
+    else renderListTab(content, browseSrc);
+  };
+
+  const renderNavigation = async (): Promise<void> => {
+    const requestedPath = browseSrc;
+    navigation.innerHTML = '';
+
+    const current = document.createElement('div');
+    current.textContent = `現在のページ: ${requestedPath}`;
+    Object.assign(current.style, { fontWeight: 'bold', marginBottom: '8px', wordBreak: 'break-all' });
+    navigation.appendChild(current);
+
+    const controls = document.createElement('div');
+    Object.assign(controls.style, { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' });
+    navigation.appendChild(controls);
+
+    const stock = normalizePagePath(getDefaultStockPage());
+    if (requestedPath !== stock) {
+      const slash = requestedPath.lastIndexOf('/');
+      const parent = slash > 0 ? requestedPath.slice(0, slash) : stock;
+      const parentBtn = document.createElement('button');
+      parentBtn.type = 'button';
+      parentBtn.textContent = '↑ 親ページ';
+      Object.assign(parentBtn.style, {
+        background: '#fff', border: '1px solid #aaa', borderRadius: '4px',
+        padding: '5px 8px', cursor: 'pointer', fontSize: '12px',
+      });
+      parentBtn.addEventListener('click', () => {
+        browseSrc = normalizePagePath(parent);
+        selectTab(activeTab);
+        renderNavigation().catch(() => {});
+      });
+      controls.appendChild(parentBtn);
+    }
+
+    const childLoading = document.createElement('span');
+    childLoading.textContent = '子ページを読み込み中...';
+    Object.assign(childLoading.style, { color: '#888', fontSize: '11px' });
+    controls.appendChild(childLoading);
+    try {
+      const children = await listChildPages(requestedPath);
+      if (browseSrc !== requestedPath) return;
+      childLoading.remove();
+      if (children.length === 0) {
+        const none = document.createElement('span');
+        none.textContent = 'サブページなし';
+        Object.assign(none.style, { color: '#888', fontSize: '11px' });
+        controls.appendChild(none);
+      } else {
+        for (const child of children) {
+          const childBtn = document.createElement('button');
+          childBtn.type = 'button';
+          childBtn.textContent = `📁 ${child.slice(requestedPath.length + 1)}`;
+          childBtn.title = child;
+          Object.assign(childBtn.style, {
+            background: '#fff', border: '1px solid #7aa7c7', borderRadius: '4px',
+            padding: '5px 8px', cursor: 'pointer', fontSize: '12px',
+          });
+          childBtn.addEventListener('click', () => {
+            browseSrc = child;
+            selectTab(activeTab);
+            renderNavigation().catch(() => {});
+          });
+          controls.appendChild(childBtn);
+        }
+      }
+    } catch (e) {
+      childLoading.textContent = 'サブページを取得できませんでした';
+      console.warn('[custom-map-register] failed to list child pages', e);
+    }
   };
 
   tabNew.addEventListener('click', () => selectTab('new'));
@@ -192,20 +278,19 @@ const openRegisterModal = (): void => {
   body.appendChild(content);
 
   selectTab('new');
+  renderNavigation().catch(() => {});
 };
 
 // タブ1(図面を登録)の要素から、指定の元ファイルで登録フォームを開く。
 // タブ2の「再登録」から呼ぶために、モジュールスコープに保持する。
-let openRegisterFormWith: ((file: string, type?: 'cad' | 'image') => void) | null = null;
+let openRegisterFormWith: ((file: string, type?: 'cad' | 'image', src?: string) => void) | null = null;
 
 // ------------------------------------------------------------
 // 新規登録タブ
 // ------------------------------------------------------------
-const renderNewTab = (container: HTMLElement): void => {
-  const src = getDefaultStockPage();
-
+const renderNewTab = (container: HTMLElement, src: string): void => {
   // タブ2の再登録から呼べるよう、登録フォームを開く関数を公開する。
-  openRegisterFormWith = (file: string, type?: 'cad' | 'image') => renderRegisterForm(container, file, src, type);
+  openRegisterFormWith = (file: string, type?: 'cad' | 'image', source = src) => renderRegisterForm(container, file, source, type);
 
   const info = document.createElement('div');
   info.innerHTML = `「${src}」内の CAD（.dxf / .jww）・画像（.png / .jpg 等）から選び、<b>別名で登録</b>します。`
@@ -303,6 +388,7 @@ const renderNewTab = (container: HTMLElement): void => {
 
 // 登録候補一覧の1行(種別バッジ・登録状態で色分け・「済」バッジ)。
 const buildCadRow = (f: SourceFileEntry, src: string, container: HTMLElement): HTMLElement => {
+  const sourceSrc = f.src || src;
   const row = document.createElement('button');
   row.type = 'button';
   Object.assign(row.style, {
@@ -328,6 +414,16 @@ const buildCadRow = (f: SourceFileEntry, src: string, container: HTMLElement): H
   Object.assign(nameEl.style, { flex: '1 1 auto', wordBreak: 'break-all' });
   row.appendChild(nameEl);
 
+  if (f.src && f.src !== src) {
+    const sourceEl = document.createElement('span');
+    sourceEl.textContent = f.src;
+    sourceEl.title = f.src;
+    Object.assign(sourceEl.style, {
+      flex: '0 1 35%', color: '#777', fontSize: '11px', wordBreak: 'break-all',
+    });
+    row.appendChild(sourceEl);
+  }
+
   if (f.registered) {
     const badge = document.createElement('span');
     badge.textContent = `済 (${f.registeredAs.length})`;
@@ -339,7 +435,7 @@ const buildCadRow = (f: SourceFileEntry, src: string, container: HTMLElement): H
     row.appendChild(badge);
   }
 
-  row.addEventListener('click', () => renderRegisterForm(container, f.name, src, f.type));
+  row.addEventListener('click', () => renderRegisterForm(container, f.name, sourceSrc, f.type));
   return row;
 };
 
@@ -366,7 +462,7 @@ const renderRegisterForm = (
     background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px',
     padding: '6px 10px', cursor: 'pointer', fontSize: '12px', marginBottom: '10px',
   });
-  back.addEventListener('click', () => { container.innerHTML = ''; renderNewTab(container); });
+  back.addEventListener('click', () => { container.innerHTML = ''; renderNewTab(container, src); });
   container.appendChild(back);
 
   const title = document.createElement('div');
@@ -528,7 +624,7 @@ const renderRegisterForm = (
       .then((r) => {
         showToast(`登録しました: ${r.name}（記法で file="${r.name}" と指定）`);
         container.innerHTML = '';
-        renderNewTab(container);
+        renderNewTab(container, src);
       })
       .catch((e) => {
         showToast(`登録に失敗しました: ${e.message}`, true);
@@ -544,8 +640,7 @@ const renderRegisterForm = (
 // ------------------------------------------------------------
 // 登録済み一覧タブ(閲覧のみ・削除なし)
 // ------------------------------------------------------------
-const renderListTab = (container: HTMLElement): void => {
-  const src = getDefaultStockPage();
+const renderListTab = (container: HTMLElement, src: string): void => {
 
   const info = document.createElement('div');
   info.innerHTML = '登録済みの図面です（記法の <code>file</code> に登録名を指定して使います）。'
@@ -620,7 +715,7 @@ const renderListTab = (container: HTMLElement): void => {
             grid.appendChild(none);
             return;
           }
-          for (const asset of shown) grid.appendChild(buildAssetCard(asset, container));
+          for (const asset of shown) grid.appendChild(buildAssetCard(asset, src, container));
         };
         renderRegisteredAssets(search.value);
       })
@@ -641,7 +736,7 @@ const renderListTab = (container: HTMLElement): void => {
 };
 
 // 登録済みカード(閲覧＋再登録。削除は UI から廃止)。
-const buildAssetCard = (asset: RegisteredAsset, container: HTMLElement): HTMLElement => {
+const buildAssetCard = (asset: RegisteredAsset, src: string, container: HTMLElement): HTMLElement => {
   const cell = document.createElement('div');
   Object.assign(cell.style, {
     display: 'flex', flexDirection: 'column', gap: '6px', border: '1px solid #ddd',
@@ -687,8 +782,8 @@ const buildAssetCard = (asset: RegisteredAsset, container: HTMLElement): HTMLEle
     // openRegisterFormWith は renderNewTab が公開する。まずタブを描画してから呼ぶ。
     const t = asset.type === 'image' ? 'image' : 'cad';
     container.innerHTML = '';
-    renderNewTab(container);
-    if (openRegisterFormWith) openRegisterFormWith(asset.srcFile, t);
+    renderNewTab(container, asset.src || src);
+    if (openRegisterFormWith) openRegisterFormWith(asset.srcFile, t, asset.src || src);
   });
 
   cell.appendChild(thumb);
@@ -744,7 +839,9 @@ const ensureFab = (): void => {
   fab.addEventListener('click', (e) => {
     e.preventDefault();
     try {
-      openRegisterModal();
+      openRegisterModal().catch((err) => {
+        console.error('[custom-map-register] failed to open modal', err);
+      });
     } catch (err) {
       console.error('[custom-map-register] failed to open modal', err);
     }
