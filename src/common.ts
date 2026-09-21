@@ -217,8 +217,40 @@ export const apiv3Get = async (
   return res.json() as Promise<Record<string, unknown>>;
 };
 
-// 指定ページ直下の子ページを取得する。GROWI の pages/list は子孫を返すため、
-// 親自身と孫以下を除外して、フォルダブラウザ用の直下ページだけに絞る。
+// ページ一覧レスポンスの形式差を吸収する。
+const pageListFromResponse = (data: Record<string, unknown>): unknown[] | null => {
+  const paginate = data.paginateResult as Record<string, unknown> | undefined;
+  const nested = data.data as Record<string, unknown> | undefined;
+  const candidates: unknown[] = [
+    data.pages,
+    data.docs,
+    paginate?.docs,
+    paginate?.pages,
+    nested?.pages,
+    nested?.docs,
+  ];
+  const pages = candidates.find((value) => Array.isArray(value));
+  return Array.isArray(pages) ? pages : null;
+};
+
+const pageTotalFromResponse = (data: Record<string, unknown>): number | null => {
+  const paginate = data.paginateResult as Record<string, unknown> | undefined;
+  const nested = data.data as Record<string, unknown> | undefined;
+  const candidates: unknown[] = [
+    data.totalCount,
+    data.total,
+    paginate?.totalCount,
+    paginate?.totalDocs,
+    paginate?.total,
+    nested?.totalCount,
+    nested?.total,
+  ];
+  const value = candidates.find((candidate) => Number.isFinite(Number(candidate)) && Number(candidate) > 0);
+  return value == null ? null : Number(value);
+};
+
+// 指定ページ直下の子ページを取得する。GROWI の pages/list は子孫を返す場合と
+// 直下だけを返す場合があるため、取得結果を親直下に絞り込む。
 export const listChildPages = async (parentPath: string): Promise<string[]> => {
   const parent = normalizePagePath(parentPath);
   if (!parent) return [];
@@ -233,18 +265,22 @@ export const listChildPages = async (parentPath: string): Promise<string[]> => {
       limit: String(limit),
       offset: String(offset),
     });
-    const rawPages = Array.isArray(data.pages) ? data.pages : [];
+    const rawPages = pageListFromResponse(data);
+    if (!rawPages) throw new Error('GROWI pages/list response does not contain a page array');
     for (const raw of rawPages) {
       const page = raw as Record<string, unknown>;
-      if (typeof page.path === 'string') pages.push(normalizePagePath(page.path));
+      const nested = page.page as Record<string, unknown> | undefined;
+      const path = page.path || nested?.path;
+      if (typeof path === 'string') pages.push(normalizePagePath(path));
     }
-    const total = Number(data.totalCount || 0);
+    const total = pageTotalFromResponse(data);
     offset += rawPages.length;
-    if (rawPages.length === 0 || (total > 0 && offset >= total)) break;
-    if (rawPages.length < limit && total <= 0) break;
+    if (rawPages.length === 0) break;
+    if (total != null && offset >= total) break;
+    if (total == null && rawPages.length < limit) break;
   }
 
-  const prefix = `${parent}/`;
+  const prefix = parent === '/' ? '/' : `${parent}/`;
   return Array.from(new Set(pages))
     .filter((path) => path !== parent && path.startsWith(prefix))
     .filter((path) => !path.slice(prefix.length).includes('/'))
