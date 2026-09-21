@@ -8,6 +8,9 @@ import {
   getPageBodyById,
   updatePageBody,
   uploadAttachment,
+  getAttachmentsForPage,
+  attachmentName,
+  attachmentUrl,
   normalizeForSearch,
   toNumber,
   clamp,
@@ -463,6 +466,124 @@ const createModalShell = (
   return { overlay, card, body };
 };
 
+// 添付ファイル名が画像かどうか(拡張子で判定)。
+const isImageAttachmentName = (name: string): boolean => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+
+// 変換 API 未設定(お手軽運用)時の平面図選択モーダル。
+// ストックページ(既定 media-library)の添付画像から選び、file="添付ファイル名" を入れる。
+// 登録アセット版(openImageListModal)と UI をそろえる。
+const openAttachmentImageListModal = async (): Promise<void> => {
+  const stockPage = getDefaultStockPage();
+  const { body } = createModalShell('地図を選択（画像の添付）');
+
+  const info = document.createElement('div');
+  info.innerHTML = `ストックページ（<code style="font-family:monospace;">${stockPage}</code>）に添付された画像から選びます。`
+    + '<br>使いたい画像がここに無い場合は、そのページに画像を添付してください。';
+  Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
+  body.appendChild(info);
+
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = 'ファイル名で絞り込み...';
+  Object.assign(search.style, {
+    width: '100%', padding: '6px 8px', boxSizing: 'border-box', fontSize: '13px',
+    marginBottom: '10px', border: '1px solid #ccc', borderRadius: '4px',
+  });
+  body.appendChild(search);
+
+  const loading = document.createElement('div');
+  loading.textContent = '読み込み中...';
+  Object.assign(loading.style, { color: '#666', padding: '20px', textAlign: 'center' });
+  body.appendChild(loading);
+
+  const grid = document.createElement('div');
+  Object.assign(grid.style, {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '12px',
+  });
+  body.appendChild(grid);
+
+  let attachments: { name: string; url: string }[] = [];
+  try {
+    const list = await getAttachmentsForPage(stockPage);
+    attachments = list
+      .map((a) => ({ name: attachmentName(a), url: attachmentUrl(a) }))
+      .filter((a) => isImageAttachmentName(a.name));
+  } catch (e) {
+    console.error('[custom-map-editor] attachment list fetch error', e);
+    loading.remove();
+    const err = document.createElement('div');
+    err.innerHTML = `ストックページ（<code style="font-family:monospace;">${stockPage}</code>）の添付一覧を取得できませんでした。`
+      + '<br>ページが存在し、閲覧できる状態か確認してください。';
+    Object.assign(err.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px', lineHeight: '1.7' });
+    body.appendChild(err);
+    return;
+  }
+  loading.remove();
+
+  if (attachments.length === 0) {
+    const empty = document.createElement('div');
+    empty.innerHTML = `ストックページ（<code style="font-family:monospace;">${stockPage}</code>）に画像の添付がありません。`
+      + '<br>そのページに平面図画像を添付すると、ここに表示されます。';
+    Object.assign(empty.style, { color: '#666', padding: '20px', textAlign: 'center', lineHeight: '1.7' });
+    body.appendChild(empty);
+    return;
+  }
+
+  const buildCell = (att: { name: string; url: string }): HTMLElement => {
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    Object.assign(cell.style, {
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+      border: '1px solid #ddd', borderRadius: '6px', padding: '8px', background: '#fafafa',
+      cursor: 'pointer',
+    });
+
+    const thumb = document.createElement('img');
+    thumb.src = att.url;
+    thumb.alt = att.name;
+    thumb.loading = 'lazy';
+    Object.assign(thumb.style, {
+      width: '100%', height: '100px', objectFit: 'contain', background: '#fff',
+    });
+
+    const name = document.createElement('div');
+    name.textContent = att.name;
+    Object.assign(name.style, {
+      fontSize: '12px', color: '#333', wordBreak: 'break-all', textAlign: 'center',
+      lineHeight: '1.3', maxHeight: '2.6em', overflow: 'hidden', fontFamily: 'monospace',
+    });
+
+    cell.appendChild(thumb);
+    cell.appendChild(name);
+    // 選ぶと file="添付ファイル名"。src は既定ストックページ運用に任せて空。
+    cell.addEventListener('click', () => openMapPreviewModal({
+      imageUrl: att.url,
+      initialSettings: {
+        file: att.name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
+        pinSize: PIN_SIZE_DEFAULT, labelSize: LABEL_SIZE_DEFAULT,
+      },
+    }));
+    return cell;
+  };
+
+  const render = (filter: string): void => {
+    grid.innerHTML = '';
+    const kw = normalizeForSearch(filter.trim());
+    const shown = attachments.filter((a) => !kw || normalizeForSearch(a.name).includes(kw));
+    if (shown.length === 0) {
+      const none = document.createElement('div');
+      none.textContent = '該当する画像がありません。';
+      Object.assign(none.style, { color: '#888', padding: '12px', gridColumn: '1 / -1', textAlign: 'center', fontSize: '12px' });
+      grid.appendChild(none);
+      return;
+    }
+    for (const att of shown) grid.appendChild(buildCell(att));
+  };
+
+  render('');
+  search.addEventListener('input', () => render(search.value));
+};
+
 // 登録アセット(API 登録済みの地図)の一覧モーダル。
 // 設計方針: 一般ページ編集者は media-library を直接参照できないため、GUI の
 // 平面図選択は「API に登録済みの地図アセット(GET /assets)」からのみ行う。
@@ -622,21 +743,15 @@ const openEditListModal = async (): Promise<void> => {
 };
 
 const openImageListModal = async (): Promise<void> => {
-  const { body } = createModalShell('地図を選択（登録済みアセット）');
-
-  // 変換 API(cadConvertApi)未設定だと登録アセットを取得できない。
-  // このお手軽運用では、画像をこのページ(既定 media-library)の添付として置き、
-  // 記法に file="添付ファイル名" を手書きする運用になる。
+  // 変換 API(cadConvertApi)未設定のお手軽運用では、登録アセットは使えないので、
+  // ストックページ(既定 media-library)の添付画像から直接選ばせる。
+  // 選ぶと file="添付ファイル名" を記法に入れる(添付直参照の正規経路)。
   if (!getCadConvertApi()) {
-    const note = document.createElement('div');
-    note.innerHTML = '地図アセット API（cadConvertApi）が設定されていません。'
-      + '<br><br>API なしのお手軽運用では、地図画像をページの添付として保存し、'
-      + '記法に <code style="font-family:monospace;background:#f2f2f2;padding:1px 4px;border-radius:3px;">file="添付ファイル名"</code> を直接指定してください。'
-      + '<br>この場合、画像を置いたページ（既定 media-library）は閲覧できる状態にしておく必要があります。';
-    Object.assign(note.style, { color: '#664d03', padding: '20px', fontSize: '13px', lineHeight: '1.7' });
-    body.appendChild(note);
+    await openAttachmentImageListModal();
     return;
   }
+
+  const { body } = createModalShell('地図を選択（登録済みアセット）');
 
   const info = document.createElement('div');
   info.textContent = 'MAP 編集者が登録した地図から選びます。ここに無い図面は、MAP 編集者に登録を依頼してください。';
