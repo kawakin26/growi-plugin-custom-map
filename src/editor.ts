@@ -1,6 +1,8 @@
 import {
   getDefaultStockPage,
   isStockAreaPath,
+  normalizePagePath,
+  listChildPages,
   getCadConvertApi,
   resolveCurrentPagePath,
   fetchRegisteredAssets,
@@ -471,16 +473,101 @@ const createModalShell = (
 // 添付ファイル名が画像かどうか(拡張子で判定)。
 const isImageAttachmentName = (name: string): boolean => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
 
+// ストック領域の現在ページを、地図選択モーダルの初期ページとして返す。
+// 通常ページから開いた場合は既定ストックページ、media-library配下から開いた場合は
+// その現在ページから開始する。
+const resolveInitialStockBrowsePath = async (): Promise<string> => {
+  const stock = normalizePagePath(getDefaultStockPage());
+  try {
+    const current = await resolveCurrentPagePath();
+    return isStockAreaPath(current) ? normalizePagePath(current) : stock;
+  } catch {
+    return stock;
+  }
+};
+
+// ①地図アセット登録と同じ、ストックページ用の親/子ページナビゲーション。
+// ページボタンを押したときは呼び出し側が一覧を再取得する。
+const renderStockPageNavigation = async (
+  navigation: HTMLElement,
+  currentPath: string,
+  onNavigate: (path: string) => void,
+  isCurrent: () => boolean = () => true,
+): Promise<void> => {
+  const requestedPath = normalizePagePath(currentPath);
+  navigation.innerHTML = '';
+  Object.assign(navigation.style, {
+    padding: '10px 12px', marginBottom: '12px', background: '#f5f8fa',
+    border: '1px solid #dbe3e8', borderRadius: '6px', fontSize: '12px',
+  });
+
+  const current = document.createElement('div');
+  current.textContent = `現在のページ: ${requestedPath}`;
+  Object.assign(current.style, { fontWeight: 'bold', marginBottom: '8px', wordBreak: 'break-all' });
+  navigation.appendChild(current);
+
+  const controls = document.createElement('div');
+  Object.assign(controls.style, { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' });
+  navigation.appendChild(controls);
+
+  const stock = normalizePagePath(getDefaultStockPage());
+  if (requestedPath !== stock) {
+    const slash = requestedPath.lastIndexOf('/');
+    const parent = slash > 0 ? requestedPath.slice(0, slash) : stock;
+    const parentBtn = document.createElement('button');
+    parentBtn.type = 'button';
+    parentBtn.textContent = '↑ 親ページ';
+    Object.assign(parentBtn.style, {
+      background: '#fff', border: '1px solid #aaa', borderRadius: '4px',
+      padding: '5px 8px', cursor: 'pointer', fontSize: '12px',
+    });
+    parentBtn.addEventListener('click', () => onNavigate(normalizePagePath(parent)));
+    controls.appendChild(parentBtn);
+  }
+
+  const childLoading = document.createElement('span');
+  childLoading.textContent = '子ページを読み込み中...';
+  Object.assign(childLoading.style, { color: '#888', fontSize: '11px' });
+  controls.appendChild(childLoading);
+  try {
+    const children = await listChildPages(requestedPath);
+    if (!isCurrent()) return;
+    childLoading.remove();
+    if (children.length === 0) {
+      const none = document.createElement('span');
+      none.textContent = 'サブページなし';
+      Object.assign(none.style, { color: '#888', fontSize: '11px' });
+      controls.appendChild(none);
+    } else {
+      for (const child of children) {
+        const childBtn = document.createElement('button');
+        childBtn.type = 'button';
+        childBtn.textContent = `📁 ${child.slice(requestedPath.length + 1)}`;
+        childBtn.title = child;
+        Object.assign(childBtn.style, {
+          background: '#fff', border: '1px solid #7aa7c7', borderRadius: '4px',
+          padding: '5px 8px', cursor: 'pointer', fontSize: '12px',
+        });
+        childBtn.addEventListener('click', () => onNavigate(child));
+        controls.appendChild(childBtn);
+      }
+    }
+  } catch (e) {
+    childLoading.textContent = 'サブページを取得できませんでした';
+    console.warn('[custom-map-editor] failed to list stock child pages', e);
+  }
+};
+
 // 変換 API 未設定(お手軽運用)時の平面図選択モーダル。
 // ストックページ(既定 media-library)の添付画像から選び、file="添付ファイル名" を入れる。
 // 登録アセット版(openImageListModal)と UI をそろえる。
 const openAttachmentImageListModal = async (): Promise<void> => {
-  const stockPage = getDefaultStockPage();
+  let browseSrc = await resolveInitialStockBrowsePath();
   const { body } = createModalShell('地図を選択（画像の添付）');
 
+  const navigation = document.createElement('div');
+  body.appendChild(navigation);
   const info = document.createElement('div');
-  info.innerHTML = `ストックページ（<code style="font-family:monospace;">${stockPage}</code>）に添付された画像から選びます。`
-    + '<br>使いたい画像がここに無い場合は、そのページに画像を添付してください。';
   Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
   body.appendChild(info);
 
@@ -504,86 +591,98 @@ const openAttachmentImageListModal = async (): Promise<void> => {
   });
   body.appendChild(grid);
 
+  let requestId = 0;
   let attachments: { name: string; url: string }[] = [];
-  try {
-    const list = await getAttachmentsForPage(stockPage);
-    attachments = list
-      .map((a) => ({ name: attachmentName(a), url: attachmentUrl(a) }))
-      .filter((a) => isImageAttachmentName(a.name));
-  } catch (e) {
-    console.error('[custom-map-editor] attachment list fetch error', e);
-    loading.remove();
-    const err = document.createElement('div');
-    err.innerHTML = `ストックページ（<code style="font-family:monospace;">${stockPage}</code>）の添付一覧を取得できませんでした。`
-      + '<br>ページが存在し、閲覧できる状態か確認してください。';
-    Object.assign(err.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px', lineHeight: '1.7' });
-    body.appendChild(err);
-    return;
-  }
-  loading.remove();
-
-  if (attachments.length === 0) {
-    const empty = document.createElement('div');
-    empty.innerHTML = `ストックページ（<code style="font-family:monospace;">${stockPage}</code>）に画像の添付がありません。`
-      + '<br>そのページに平面図画像を添付すると、ここに表示されます。';
-    Object.assign(empty.style, { color: '#666', padding: '20px', textAlign: 'center', lineHeight: '1.7' });
-    body.appendChild(empty);
-    return;
-  }
-
-  const buildCell = (att: { name: string; url: string }): HTMLElement => {
-    const cell = document.createElement('button');
-    cell.type = 'button';
-    Object.assign(cell.style, {
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
-      border: '1px solid #ddd', borderRadius: '6px', padding: '8px', background: '#fafafa',
-      cursor: 'pointer',
-    });
-
-    const thumb = document.createElement('img');
-    thumb.src = att.url;
-    thumb.alt = att.name;
-    thumb.loading = 'lazy';
-    Object.assign(thumb.style, {
-      width: '100%', height: '100px', objectFit: 'contain', background: '#fff',
-    });
-
-    const name = document.createElement('div');
-    name.textContent = att.name;
-    Object.assign(name.style, {
-      fontSize: '12px', color: '#333', wordBreak: 'break-all', textAlign: 'center',
-      lineHeight: '1.3', maxHeight: '2.6em', overflow: 'hidden', fontFamily: 'monospace',
-    });
-
-    cell.appendChild(thumb);
-    cell.appendChild(name);
-    // 選ぶと file="添付ファイル名"。src は既定ストックページ運用に任せて空。
-    cell.addEventListener('click', () => openMapPreviewModal({
-      imageUrl: att.url,
-      initialSettings: {
-        file: att.name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
-        pinSize: PIN_SIZE_DEFAULT, labelSize: LABEL_SIZE_DEFAULT,
-      },
-    }));
-    return cell;
-  };
 
   const render = (filter: string): void => {
     grid.innerHTML = '';
     const kw = normalizeForSearch(filter.trim());
     const shown = attachments.filter((a) => !kw || normalizeForSearch(a.name).includes(kw));
     if (shown.length === 0) {
-      const none = document.createElement('div');
-      none.textContent = '該当する画像がありません。';
-      Object.assign(none.style, { color: '#888', padding: '12px', gridColumn: '1 / -1', textAlign: 'center', fontSize: '12px' });
-      grid.appendChild(none);
+      const empty = document.createElement('div');
+      empty.textContent = `「${browseSrc}」に画像の添付がありません。`;
+      Object.assign(empty.style, { color: '#666', padding: '20px', gridColumn: '1 / -1', textAlign: 'center' });
+      grid.appendChild(empty);
       return;
     }
+
+    const buildCell = (att: { name: string; url: string }): HTMLElement => {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      Object.assign(cell.style, {
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+        border: '1px solid #ddd', borderRadius: '6px', padding: '8px', background: '#fafafa',
+        cursor: 'pointer',
+      });
+
+      const thumb = document.createElement('img');
+      thumb.src = att.url;
+      thumb.alt = att.name;
+      thumb.loading = 'lazy';
+      Object.assign(thumb.style, {
+        width: '100%', height: '100px', objectFit: 'contain', background: '#fff',
+      });
+
+      const name = document.createElement('div');
+      name.textContent = att.name;
+      Object.assign(name.style, {
+        fontSize: '12px', color: '#333', wordBreak: 'break-all', textAlign: 'center',
+        lineHeight: '1.3', maxHeight: '2.6em', overflow: 'hidden', fontFamily: 'monospace',
+      });
+
+      cell.appendChild(thumb);
+      cell.appendChild(name);
+      // 子ページの添付を選んだ場合も、その所属ページを記法に保存する。
+      cell.addEventListener('click', () => openMapPreviewModal({
+        imageUrl: att.url,
+        initialSettings: {
+          file: att.name, src: browseSrc, cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
+          pinSize: PIN_SIZE_DEFAULT, labelSize: LABEL_SIZE_DEFAULT,
+        },
+      }));
+      return cell;
+    };
+
     for (const att of shown) grid.appendChild(buildCell(att));
   };
 
-  render('');
+  const renderPage = async (path: string): Promise<void> => {
+    browseSrc = normalizePagePath(path);
+    const currentRequest = ++requestId;
+    info.innerHTML = `ページ（<code style="font-family:monospace;">${browseSrc}</code>）に添付された画像から選びます。`
+      + '<br>親ページやサブページへ移動できます。';
+    loading.style.display = 'block';
+    grid.innerHTML = '';
+    attachments = [];
+
+    renderStockPageNavigation(
+      navigation,
+      browseSrc,
+      (next) => { renderPage(next).catch((e) => console.error('[custom-map-editor] failed to change stock page', e)); },
+      () => currentRequest === requestId,
+    ).catch((e) => console.warn('[custom-map-editor] stock navigation failed', e));
+
+    try {
+      const list = await getAttachmentsForPage(browseSrc);
+      if (currentRequest !== requestId) return;
+      attachments = list
+        .map((a) => ({ name: attachmentName(a), url: attachmentUrl(a) }))
+        .filter((a) => isImageAttachmentName(a.name));
+      loading.style.display = 'none';
+      render(search.value);
+    } catch (e) {
+      if (currentRequest !== requestId) return;
+      loading.style.display = 'none';
+      const err = document.createElement('div');
+      err.textContent = `ページ（${browseSrc}）の添付一覧を取得できませんでした。`;
+      Object.assign(err.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px' });
+      grid.appendChild(err);
+      console.error('[custom-map-editor] attachment list fetch error', e);
+    }
+  };
+
   search.addEventListener('input', () => render(search.value));
+  await renderPage(browseSrc);
 };
 
 // 登録アセット(API 登録済みの地図)の一覧モーダル。
@@ -769,10 +868,14 @@ const openImageListModal = async (): Promise<void> => {
     return;
   }
 
+  let browseSrc = await resolveInitialStockBrowsePath();
   const { body } = createModalShell('地図を選択（登録済みアセット）');
 
+  const navigation = document.createElement('div');
+  body.appendChild(navigation);
+
   const info = document.createElement('div');
-  info.textContent = 'MAP 編集者が登録した地図から選びます。ここに無い図面は、MAP 編集者に登録を依頼してください。';
+  info.textContent = 'ページごとの登録済みアセットから選びます。親ページやサブページへ移動できます。';
   Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
   body.appendChild(info);
 
@@ -798,28 +901,7 @@ const openImageListModal = async (): Promise<void> => {
   body.appendChild(grid);
 
   let assets: RegisteredAsset[] = [];
-  try {
-    // src 省略で全登録アセットを取得(登録は media-library 由来だが、一般編集者は
-    // その閲覧権限が無くても GET /assets 自体は認証不要で叩ける)。
-    assets = await fetchRegisteredAssets();
-  } catch (e) {
-    console.error('[custom-map-editor] registered assets fetch error', e);
-    loading.remove();
-    const err = document.createElement('div');
-    err.textContent = '登録アセットの取得に失敗しました。API サーバーの稼働状況を確認してください。';
-    Object.assign(err.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px' });
-    body.appendChild(err);
-    return;
-  }
-  loading.remove();
-
-  if (assets.length === 0) {
-    const empty = document.createElement('div');
-    empty.textContent = '登録済みの地図がありません。MAP 編集者が「地図アセットの登録」から登録すると、ここに表示されます。';
-    Object.assign(empty.style, { color: '#666', padding: '20px', textAlign: 'center' });
-    body.appendChild(empty);
-    return;
-  }
+  let requestId = 0;
 
   const buildCell = (asset: RegisteredAsset): HTMLElement => {
     const cell = document.createElement('button');
@@ -855,7 +937,8 @@ const openImageListModal = async (): Promise<void> => {
     cell.addEventListener('click', () => openMapPreviewModal({
       imageUrl: asset.imageUrl,
       initialSettings: {
-        file: asset.name, src: '', cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
+        file: asset.name, src: asset.src || browseSrc, cx: 50, cy: 50, scale: 1,
+        link: 'マップを開く', restore: 15, rotate: 0,
         pinSize: PIN_SIZE_DEFAULT, labelSize: LABEL_SIZE_DEFAULT,
       },
     }));
@@ -870,16 +953,47 @@ const openImageListModal = async (): Promise<void> => {
       || normalizeForSearch(a.srcFile || '').includes(kw));
     if (shown.length === 0) {
       const none = document.createElement('div');
-      none.textContent = '該当する登録がありません。';
-      Object.assign(none.style, { color: '#888', padding: '12px', gridColumn: '1 / -1', textAlign: 'center', fontSize: '12px' });
+      none.textContent = `「${browseSrc}」に登録済みの地図がありません。`;
+      Object.assign(none.style, { color: '#666', padding: '20px', gridColumn: '1 / -1', textAlign: 'center' });
       grid.appendChild(none);
       return;
     }
     for (const asset of shown) grid.appendChild(buildCell(asset));
   };
 
-  render('');
+  const renderPage = async (path: string): Promise<void> => {
+    browseSrc = normalizePagePath(path);
+    const currentRequest = ++requestId;
+    info.textContent = `ページ「${browseSrc}」の登録済みアセットから選びます。親ページやサブページへ移動できます。`;
+    loading.style.display = 'block';
+    grid.innerHTML = '';
+    assets = [];
+
+    renderStockPageNavigation(
+      navigation,
+      browseSrc,
+      (next) => { renderPage(next).catch((e) => console.error('[custom-map-editor] failed to change stock page', e)); },
+      () => currentRequest === requestId,
+    ).catch((e) => console.warn('[custom-map-editor] stock navigation failed', e));
+
+    try {
+      assets = await fetchRegisteredAssets(browseSrc);
+      if (currentRequest !== requestId) return;
+      loading.style.display = 'none';
+      render(search.value);
+    } catch (e) {
+      if (currentRequest !== requestId) return;
+      loading.style.display = 'none';
+      const err = document.createElement('div');
+      err.textContent = `ページ「${browseSrc}」の登録アセット取得に失敗しました。API サーバーの稼働状況を確認してください。`;
+      Object.assign(err.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px' });
+      grid.appendChild(err);
+      console.error('[custom-map-editor] registered assets fetch error', e);
+    }
+  };
+
   search.addEventListener('input', () => render(search.value));
+  await renderPage(browseSrc);
 };
 
 // 既存記法の再編集で使う、置換対象ブロックの文脈。
