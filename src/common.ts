@@ -63,10 +63,12 @@ export interface SourceFileEntry {
 
 // ページ内の登録候補(CAD＋画像)一覧を登録状態付きで取得する(登録タブ用)。
 // 登録済みの元ファイルも除外せず返る(別名で再登録できる運用)。
-export const fetchSourceFiles = async (src: string): Promise<SourceFileEntry[]> => {
+// deep=true を指定すると、src 配下の全子孫ページの添付も含めて返す(階層横断)。
+export const fetchSourceFiles = async (src: string, deep = false): Promise<SourceFileEntry[]> => {
   const base = getAssetsApiBase();
   if (!base) throw new Error('cadConvertApi is not configured');
-  const url = `${base}/source-files?src=${encodeURIComponent(src)}`;
+  const deepParam = deep ? '&deep=true' : '';
+  const url = `${base}/source-files?src=${encodeURIComponent(src)}${deepParam}`;
   const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`fetch source files failed: ${res.status}`);
   const data = await res.json();
@@ -74,10 +76,12 @@ export const fetchSourceFiles = async (src: string): Promise<SourceFileEntry[]> 
 };
 
 // 登録済みアセット一覧を取得する(削除タブ用)。src 省略で全件。
-export const fetchRegisteredAssets = async (src?: string): Promise<RegisteredAsset[]> => {
+// deep=true を指定すると、src 配下の全子孫ページ由来のアセットも含めて返す。
+export const fetchRegisteredAssets = async (src?: string, deep = false): Promise<RegisteredAsset[]> => {
   const base = getAssetsApiBase();
   if (!base) throw new Error('cadConvertApi is not configured');
-  const url = src ? `${base}?src=${encodeURIComponent(src)}` : base;
+  const deepParam = deep ? '&deep=true' : '';
+  const url = src ? `${base}?src=${encodeURIComponent(src)}${deepParam}` : base;
   const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`fetch assets failed: ${res.status}`);
   const data = await res.json();

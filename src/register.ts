@@ -220,9 +220,24 @@ const renderNewTab = (container: HTMLElement): void => {
   search.placeholder = 'ファイル名で絞り込み...';
   Object.assign(search.style, {
     width: '100%', padding: '6px 8px', boxSizing: 'border-box', fontSize: '13px',
-    marginBottom: '10px', border: '1px solid #ccc', borderRadius: '4px',
+    marginBottom: '8px', border: '1px solid #ccc', borderRadius: '4px',
   });
   container.appendChild(search);
+
+  // 配下検索チェックボックス
+  const deepCheckWrap = document.createElement('label');
+  Object.assign(deepCheckWrap.style, {
+    display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px',
+    marginBottom: '10px', cursor: 'pointer',
+  });
+  const deepCheck = document.createElement('input');
+  deepCheck.type = 'checkbox';
+  deepCheck.checked = false;
+  const deepLabel = document.createElement('span');
+  deepLabel.textContent = '配下のページも検索';
+  deepCheckWrap.appendChild(deepCheck);
+  deepCheckWrap.appendChild(deepLabel);
+  container.appendChild(deepCheckWrap);
 
   const loading = document.createElement('div');
   loading.textContent = '読み込み中...';
@@ -233,43 +248,57 @@ const renderNewTab = (container: HTMLElement): void => {
   Object.assign(listWrap.style, { display: 'flex', flexDirection: 'column', gap: '6px' });
   container.appendChild(listWrap);
 
-  fetchSourceFiles(src)
-    .then((files) => {
-      loading.remove();
-      if (files.length === 0) {
-        const empty = document.createElement('div');
-        empty.textContent = `「${src}」に登録できる CAD・画像が見つかりませんでした。`;
-        Object.assign(empty.style, { color: '#666', padding: '16px', textAlign: 'center' });
-        container.appendChild(empty);
-        return;
-      }
+  let renderNewFiles: (filter: string) => void = () => {};
 
-      const renderList = (filter: string): void => {
-        listWrap.innerHTML = '';
-        const kw = normalizeForSearch(filter.trim());
-        const shown = files.filter((f) => !kw || normalizeForSearch(f.name).includes(kw));
-        if (shown.length === 0) {
-          const none = document.createElement('div');
-          none.textContent = '該当するファイルがありません。';
-          Object.assign(none.style, { color: '#888', padding: '12px', textAlign: 'center', fontSize: '12px' });
-          listWrap.appendChild(none);
+  const loadFiles = (deep: boolean): void => {
+    loading.style.display = 'block';
+    listWrap.innerHTML = '';
+    fetchSourceFiles(src, deep)
+      .then((files) => {
+        loading.style.display = 'none';
+        if (files.length === 0) {
+          const empty = document.createElement('div');
+          empty.textContent = deep
+            ? `「${src}」とその配下に登録できる CAD・画像が見つかりませんでした。`
+            : `「${src}」に登録できる CAD・画像が見つかりませんでした。`;
+          Object.assign(empty.style, { color: '#666', padding: '16px', textAlign: 'center' });
+          listWrap.appendChild(empty);
+          renderNewFiles = () => {};
           return;
         }
-        for (const f of shown) {
-          listWrap.appendChild(buildCadRow(f, src, container));
-        }
-      };
 
-      renderList('');
-      search.addEventListener('input', () => renderList(search.value));
-    })
-    .catch((e) => {
-      loading.remove();
-      const err = document.createElement('div');
-      err.textContent = `CAD 一覧の取得に失敗しました: ${e.message}`;
-      Object.assign(err.style, { color: '#b00020', padding: '16px', textAlign: 'center', fontSize: '13px' });
-      container.appendChild(err);
-    });
+        renderNewFiles = (filter: string): void => {
+          listWrap.innerHTML = '';
+          const kw = normalizeForSearch(filter.trim());
+          const shown = files.filter((f) => !kw || normalizeForSearch(f.name).includes(kw));
+          if (shown.length === 0) {
+            const none = document.createElement('div');
+            none.textContent = '該当するファイルがありません。';
+            Object.assign(none.style, { color: '#888', padding: '12px', textAlign: 'center', fontSize: '12px' });
+            listWrap.appendChild(none);
+            return;
+          }
+          for (const f of shown) {
+            listWrap.appendChild(buildCadRow(f, src, container));
+          }
+        };
+
+        renderNewFiles(search.value);
+      })
+      .catch((e) => {
+        loading.style.display = 'none';
+        listWrap.innerHTML = '';
+        renderNewFiles = () => {};
+        const err = document.createElement('div');
+        err.textContent = `CAD 一覧の取得に失敗しました: ${e.message}`;
+        Object.assign(err.style, { color: '#b00020', padding: '16px', textAlign: 'center', fontSize: '13px' });
+        listWrap.appendChild(err);
+      });
+  };
+
+  loadFiles(false); // 初回は deep=false
+  search.addEventListener('input', () => renderNewFiles(search.value));
+  deepCheck.addEventListener('change', () => loadFiles(deepCheck.checked));
 };
 
 // 登録候補一覧の1行(種別バッジ・登録状態で色分け・「済」バッジ)。
@@ -530,9 +559,24 @@ const renderListTab = (container: HTMLElement): void => {
   search.placeholder = '登録名・元ファイル名で絞り込み...';
   Object.assign(search.style, {
     width: '100%', padding: '6px 8px', boxSizing: 'border-box', fontSize: '13px',
-    marginBottom: '10px', border: '1px solid #ccc', borderRadius: '4px',
+    marginBottom: '8px', border: '1px solid #ccc', borderRadius: '4px',
   });
   container.appendChild(search);
+
+  // 配下検索チェックボックス
+  const deepCheckWrap = document.createElement('label');
+  Object.assign(deepCheckWrap.style, {
+    display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px',
+    marginBottom: '10px', cursor: 'pointer',
+  });
+  const deepCheck = document.createElement('input');
+  deepCheck.type = 'checkbox';
+  deepCheck.checked = false;
+  const deepLabel = document.createElement('span');
+  deepLabel.textContent = '配下のページも検索';
+  deepCheckWrap.appendChild(deepCheck);
+  deepCheckWrap.appendChild(deepLabel);
+  container.appendChild(deepCheckWrap);
 
   const loading = document.createElement('div');
   loading.textContent = '読み込み中...';
@@ -545,41 +589,55 @@ const renderListTab = (container: HTMLElement): void => {
   });
   container.appendChild(grid);
 
-  fetchRegisteredAssets(src)
-    .then((assets) => {
-      loading.remove();
-      if (assets.length === 0) {
-        const empty = document.createElement('div');
-        empty.textContent = '登録済みの図面はありません。「図面を登録」タブから登録できます。';
-        Object.assign(empty.style, { color: '#666', padding: '16px', textAlign: 'center' });
-        container.appendChild(empty);
-        return;
-      }
-      const render = (filter: string): void => {
-        grid.innerHTML = '';
-        const kw = normalizeForSearch(filter.trim());
-        const shown = assets.filter((a) => !kw
-          || normalizeForSearch(a.name).includes(kw)
-          || normalizeForSearch(a.srcFile || '').includes(kw));
-        if (shown.length === 0) {
-          const none = document.createElement('div');
-          none.textContent = '該当する登録がありません。';
-          Object.assign(none.style, { color: '#888', padding: '12px', gridColumn: '1 / -1', textAlign: 'center', fontSize: '12px' });
-          grid.appendChild(none);
+  let renderRegisteredAssets: (filter: string) => void = () => {};
+
+  const loadAssets = (deep: boolean): void => {
+    loading.style.display = 'block';
+    grid.innerHTML = '';
+    fetchRegisteredAssets(src, deep)
+      .then((assets) => {
+        loading.style.display = 'none';
+        if (assets.length === 0) {
+          const empty = document.createElement('div');
+          empty.textContent = deep
+            ? '登録済みの図面はありません（配下含む）。「図面を登録」タブから登録できます。'
+            : '登録済みの図面はありません。「図面を登録」タブから登録できます。';
+          Object.assign(empty.style, { color: '#666', padding: '16px', textAlign: 'center' });
+          grid.appendChild(empty);
+          renderRegisteredAssets = () => {};
           return;
         }
-        for (const asset of shown) grid.appendChild(buildAssetCard(asset, container));
-      };
-      render('');
-      search.addEventListener('input', () => render(search.value));
-    })
-    .catch((e) => {
-      loading.remove();
-      const err = document.createElement('div');
-      err.textContent = `登録一覧の取得に失敗しました: ${e.message}`;
-      Object.assign(err.style, { color: '#b00020', padding: '16px', textAlign: 'center', fontSize: '13px' });
-      container.appendChild(err);
-    });
+        renderRegisteredAssets = (filter: string): void => {
+          grid.innerHTML = '';
+          const kw = normalizeForSearch(filter.trim());
+          const shown = assets.filter((a) => !kw
+            || normalizeForSearch(a.name).includes(kw)
+            || normalizeForSearch(a.srcFile || '').includes(kw));
+          if (shown.length === 0) {
+            const none = document.createElement('div');
+            none.textContent = '該当する登録がありません。';
+            Object.assign(none.style, { color: '#888', padding: '12px', gridColumn: '1 / -1', textAlign: 'center', fontSize: '12px' });
+            grid.appendChild(none);
+            return;
+          }
+          for (const asset of shown) grid.appendChild(buildAssetCard(asset, container));
+        };
+        renderRegisteredAssets(search.value);
+      })
+      .catch((e) => {
+        loading.style.display = 'none';
+        grid.innerHTML = '';
+        renderRegisteredAssets = () => {};
+        const err = document.createElement('div');
+        err.textContent = `登録一覧の取得に失敗しました: ${e.message}`;
+        Object.assign(err.style, { color: '#b00020', padding: '16px', textAlign: 'center', fontSize: '13px' });
+        grid.appendChild(err);
+      });
+  };
+
+  loadAssets(false); // 初回は deep=false
+  search.addEventListener('input', () => renderRegisteredAssets(search.value));
+  deepCheck.addEventListener('change', () => loadAssets(deepCheck.checked));
 };
 
 // 登録済みカード(閲覧＋再登録。削除は UI から廃止)。
