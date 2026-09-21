@@ -558,6 +558,27 @@ const renderStockPageNavigation = async (
   }
 };
 
+// 現在ページを含むストック領域の全ページを列挙する(配下検索用)。
+const listStockDescendantPages = async (rootPath: string): Promise<string[]> => {
+  const root = normalizePagePath(rootPath);
+  const result = [root];
+  const seen = new Set(result);
+  const queue = [root];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const children = await listChildPages(current);
+    for (const child of children) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      result.push(child);
+      queue.push(child);
+    }
+  }
+  return result;
+};
+
 // 変換 API 未設定(お手軽運用)時の平面図選択モーダル。
 // ストックページ(既定 media-library)の添付画像から選び、file="添付ファイル名" を入れる。
 // 登録アセット版(openImageListModal)と UI をそろえる。
@@ -580,6 +601,19 @@ const openAttachmentImageListModal = async (): Promise<void> => {
   });
   body.appendChild(search);
 
+  const deepCheckWrap = document.createElement('label');
+  Object.assign(deepCheckWrap.style, {
+    display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px',
+    marginBottom: '10px', cursor: 'pointer',
+  });
+  const deepCheck = document.createElement('input');
+  deepCheck.type = 'checkbox';
+  const deepLabel = document.createElement('span');
+  deepLabel.textContent = '配下のページも検索';
+  deepCheckWrap.appendChild(deepCheck);
+  deepCheckWrap.appendChild(deepLabel);
+  body.appendChild(deepCheckWrap);
+
   const loading = document.createElement('div');
   loading.textContent = '読み込み中...';
   Object.assign(loading.style, { color: '#666', padding: '20px', textAlign: 'center' });
@@ -592,7 +626,7 @@ const openAttachmentImageListModal = async (): Promise<void> => {
   body.appendChild(grid);
 
   let requestId = 0;
-  let attachments: { name: string; url: string }[] = [];
+  let attachments: { name: string; url: string; src: string }[] = [];
 
   const render = (filter: string): void => {
     grid.innerHTML = '';
@@ -606,7 +640,7 @@ const openAttachmentImageListModal = async (): Promise<void> => {
       return;
     }
 
-    const buildCell = (att: { name: string; url: string }): HTMLElement => {
+    const buildCell = (att: { name: string; url: string; src: string }): HTMLElement => {
       const cell = document.createElement('button');
       cell.type = 'button';
       Object.assign(cell.style, {
@@ -632,11 +666,18 @@ const openAttachmentImageListModal = async (): Promise<void> => {
 
       cell.appendChild(thumb);
       cell.appendChild(name);
+      if (att.src !== browseSrc) {
+        const source = document.createElement('div');
+        source.textContent = att.src;
+        source.title = att.src;
+        Object.assign(source.style, { fontSize: '10px', color: '#777', wordBreak: 'break-all' });
+        cell.appendChild(source);
+      }
       // 子ページの添付を選んだ場合も、その所属ページを記法に保存する。
       cell.addEventListener('click', () => openMapPreviewModal({
         imageUrl: att.url,
         initialSettings: {
-          file: att.name, src: browseSrc, cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
+          file: att.name, src: att.src, cx: 50, cy: 50, scale: 1, link: 'マップを開く', restore: 15, rotate: 0,
           pinSize: PIN_SIZE_DEFAULT, labelSize: LABEL_SIZE_DEFAULT,
         },
       }));
@@ -646,11 +687,11 @@ const openAttachmentImageListModal = async (): Promise<void> => {
     for (const att of shown) grid.appendChild(buildCell(att));
   };
 
-  const renderPage = async (path: string): Promise<void> => {
+  const renderPage = async (path: string, deep = deepCheck.checked): Promise<void> => {
     browseSrc = normalizePagePath(path);
     const currentRequest = ++requestId;
     info.innerHTML = `ページ（<code style="font-family:monospace;">${browseSrc}</code>）に添付された画像から選びます。`
-      + '<br>親ページやサブページへ移動できます。';
+      + (deep ? '<br>配下のページも検索しています。' : '<br>親ページやサブページへ移動できます。');
     loading.style.display = 'block';
     grid.innerHTML = '';
     attachments = [];
@@ -663,11 +704,13 @@ const openAttachmentImageListModal = async (): Promise<void> => {
     ).catch((e) => console.warn('[custom-map-editor] stock navigation failed', e));
 
     try {
-      const list = await getAttachmentsForPage(browseSrc);
+      const pagePaths = deep ? await listStockDescendantPages(browseSrc) : [browseSrc];
       if (currentRequest !== requestId) return;
-      attachments = list
-        .map((a) => ({ name: attachmentName(a), url: attachmentUrl(a) }))
-        .filter((a) => isImageAttachmentName(a.name));
+      const pageAttachments = await Promise.all(pagePaths.map((pagePath) => getAttachmentsForPage(pagePath)));
+      if (currentRequest !== requestId) return;
+      attachments = pageAttachments.flatMap((list, index) => list
+        .map((a) => ({ name: attachmentName(a), url: attachmentUrl(a), src: pagePaths[index] }))
+        .filter((a) => isImageAttachmentName(a.name)));
       loading.style.display = 'none';
       render(search.value);
     } catch (e) {
@@ -682,7 +725,10 @@ const openAttachmentImageListModal = async (): Promise<void> => {
   };
 
   search.addEventListener('input', () => render(search.value));
-  await renderPage(browseSrc);
+  deepCheck.addEventListener('change', () => {
+    renderPage(browseSrc, deepCheck.checked).catch((e) => console.error('[custom-map-editor] failed to search descendants', e));
+  });
+  await renderPage(browseSrc, false);
 };
 
 // 登録アセット(API 登録済みの地図)の一覧モーダル。
@@ -889,6 +935,19 @@ const openImageListModal = async (): Promise<void> => {
   });
   body.appendChild(search);
 
+  const deepCheckWrap = document.createElement('label');
+  Object.assign(deepCheckWrap.style, {
+    display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px',
+    marginBottom: '10px', cursor: 'pointer',
+  });
+  const deepCheck = document.createElement('input');
+  deepCheck.type = 'checkbox';
+  const deepLabel = document.createElement('span');
+  deepLabel.textContent = '配下のページも検索';
+  deepCheckWrap.appendChild(deepCheck);
+  deepCheckWrap.appendChild(deepLabel);
+  body.appendChild(deepCheckWrap);
+
   const loading = document.createElement('div');
   loading.textContent = '読み込み中...';
   Object.assign(loading.style, { color: '#666', padding: '20px', textAlign: 'center' });
@@ -961,10 +1020,11 @@ const openImageListModal = async (): Promise<void> => {
     for (const asset of shown) grid.appendChild(buildCell(asset));
   };
 
-  const renderPage = async (path: string): Promise<void> => {
+  const renderPage = async (path: string, deep = deepCheck.checked): Promise<void> => {
     browseSrc = normalizePagePath(path);
     const currentRequest = ++requestId;
-    info.textContent = `ページ「${browseSrc}」の登録済みアセットから選びます。親ページやサブページへ移動できます。`;
+    info.textContent = `ページ「${browseSrc}」の登録済みアセットから選びます。`
+      + (deep ? '配下のページも検索しています。' : '親ページやサブページへ移動できます。');
     loading.style.display = 'block';
     grid.innerHTML = '';
     assets = [];
@@ -977,7 +1037,7 @@ const openImageListModal = async (): Promise<void> => {
     ).catch((e) => console.warn('[custom-map-editor] stock navigation failed', e));
 
     try {
-      assets = await fetchRegisteredAssets(browseSrc);
+      assets = await fetchRegisteredAssets(browseSrc, deep);
       if (currentRequest !== requestId) return;
       loading.style.display = 'none';
       render(search.value);
@@ -993,7 +1053,10 @@ const openImageListModal = async (): Promise<void> => {
   };
 
   search.addEventListener('input', () => render(search.value));
-  await renderPage(browseSrc);
+  deepCheck.addEventListener('change', () => {
+    renderPage(browseSrc, deepCheck.checked).catch((e) => console.error('[custom-map-editor] failed to search descendants', e));
+  });
+  await renderPage(browseSrc, false);
 };
 
 // 既存記法の再編集で使う、置換対象ブロックの文脈。
