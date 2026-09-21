@@ -1315,6 +1315,7 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
   }));
   const imageUrl = opts.imageUrl;
   let selected = -1;
+  let advancedOpen = false;
 
   // 参考写真のアップロード先ページ(現在ページ)を遅延解決してキャッシュする。
   // 編集時は editContext から、新規時は resolveCurrentPageId から取得する。
@@ -1582,32 +1583,45 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
     panel.appendChild(back);
 
     panel.appendChild(sectionTitle('地図全体の設定'));
-    panel.appendChild(fieldText('起動ボタンの文言 (link)', settings.link, (v) => { settings.link = v; }));
-    panel.appendChild(fieldNumber('自動復帰(秒) (restore)', settings.restore, (v) => { settings.restore = v; }));
-    panel.appendChild(fieldNumber('初期中心X% (cx)', settings.cx, (v) => { settings.cx = v; }));
-    panel.appendChild(fieldNumber('初期中心Y% (cy)', settings.cy, (v) => { settings.cy = v; }));
-    panel.appendChild(fieldNumber('初期倍率 (scale)', settings.scale, (v) => { settings.scale = v; }));
-    panel.appendChild(fieldRotate('回転 (rotate)', settings.rotate, (v) => {
+
+    // 初期表示は折りたたみ、ユーザーが開いた状態は再描画後も保持する。
+    const advanced = document.createElement('details');
+    advanced.open = advancedOpen;
+    advanced.addEventListener('toggle', () => { advancedOpen = advanced.open; });
+    const advancedSummary = document.createElement('summary');
+    advancedSummary.textContent = '詳細設定';
+    Object.assign(advancedSummary.style, {
+      cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', padding: '6px 0',
+    });
+    advanced.appendChild(advancedSummary);
+    Object.assign(advanced.style, { borderBottom: '1px solid #eee', paddingBottom: '6px' });
+
+    advanced.appendChild(fieldText('起動ボタンの文言 (link)', settings.link, (v) => { settings.link = v; }));
+    advanced.appendChild(fieldNumber('自動復帰(秒) (restore)', settings.restore, (v) => { settings.restore = v; }));
+    advanced.appendChild(fieldNumber('初期中心X% (cx)', settings.cx, (v) => { settings.cx = v; }));
+    advanced.appendChild(fieldNumber('初期中心Y% (cy)', settings.cy, (v) => { settings.cy = v; }));
+    advanced.appendChild(fieldNumber('初期倍率 (scale)', settings.scale, (v) => { settings.scale = v; }));
+    advanced.appendChild(fieldRotate('回転 (rotate)', settings.rotate, (v) => {
       settings.rotate = normalizeRotate(v);
       fitToViewport();
       renderMarkers();
       renderPanel();
     }));
 
-    // ピン・ラベルのサイズ(px)。マップ全体共通。範囲でクランプして画面崩れを防ぐ。
+    // ピン・ラベルのサイズ(px)もマップ全体属性として詳細設定に含める。
     const pinField = fieldNumber(
       `ピンサイズ px (${PIN_SIZE_MIN}〜${PIN_SIZE_MAX})`,
       settings.pinSize,
       (v) => { settings.pinSize = clamp(v, PIN_SIZE_MIN, PIN_SIZE_MAX); renderMarkers(); },
     );
-    panel.appendChild(pinField);
+    advanced.appendChild(pinField);
     const labelField = fieldNumber(
       `ラベル文字サイズ px (${LABEL_SIZE_MIN}〜${LABEL_SIZE_MAX})`,
       settings.labelSize,
       (v) => { settings.labelSize = clamp(v, LABEL_SIZE_MIN, LABEL_SIZE_MAX); renderMarkers(); },
     );
-    panel.appendChild(labelField);
-    // 既定値に戻すボタン。
+    advanced.appendChild(labelField);
+
     const resetSize = document.createElement('button');
     resetSize.type = 'button';
     resetSize.textContent = 'ピン・ラベルサイズを既定値に戻す';
@@ -1621,7 +1635,8 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
       renderMarkers();
       renderPanel();
     });
-    panel.appendChild(resetSize);
+    advanced.appendChild(resetSize);
+    panel.appendChild(advanced);
 
     panel.appendChild(sectionTitle(`マーカー一覧 (${markers.length})`));
     if (markers.length === 0) {
@@ -1663,9 +1678,10 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
           window.setTimeout(() => { labelInput.focus(); labelInput.select(); }, 0);
         }
       }
+      // マーカー全体の説明を参考写真より先に配置する。
+      panel.appendChild(fieldText('説明/注意 (desc, | で改行)', m.desc, (v) => { m.desc = v; }));
       panel.appendChild(photoListField(m));
       panel.appendChild(fieldColor('色 (color)', m.color, (v) => { m.color = v; renderMarkers(); }));
-      panel.appendChild(fieldText('説明/注意 (desc, | で改行)', m.desc, (v) => { m.desc = v; }));
 
       const del = document.createElement('button');
       del.type = 'button';
