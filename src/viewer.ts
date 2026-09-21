@@ -187,10 +187,16 @@ const resolveCadImageUrl = async (mapData: MapData): Promise<string | null> => {
 //   1. 登録アセット(方式Q。CAD 焼き込み SVG / 画像原本)を API 配信で最優先
 //      → ストックページ秘匿でも表示でき、閲覧者権限に依存しない
 //   2. 未登録の CAD は従来どおりその場変換
-//   3. 従来の添付解決(後方互換。旧記法で直接添付を参照していたページ向け)
+//   3. ページ添付の直参照(file= が添付ファイル名)
 // いずれでも見つからなければ null(呼び出し側で「ファイルが存在しない」旨を表示)。
-// 設計方針: 今後の地図参照は登録アセット(登録名)経由が前提。media-library の
-// 生ファイル直参照は書き間違いと同等に扱い、不在メッセージで気づけるようにする。
+//
+// 運用の二段構え(重要):
+//   - 変換 API あり: 1 の登録アセット経由が正規。ストックページ(media-library)を
+//     閲覧者に秘匿しても地図は表示できる(API がGROWI権限とは独立に配信するため)。
+//   - 変換 API なし(お手軽運用): 1・2 は API 依存のため機能せず、3 の添付直参照が
+//     「正規の経路」になる。この経路は GROWI の閲覧権限に従うので、画像を置いた
+//     ストックページ(既定 media-library)を閲覧できる状態=公開しておく必要がある。
+//     つまり API なし運用では media-library の秘匿はできない(見栄えの割り切り)。
 const resolveMapImageUrl = async (mapData: MapData): Promise<string | null> => {
   // 1. 登録アセット優先(file が登録名なら CAD・画像とも API 配信 URL を返す)
   const registeredUrl = await resolveRegisteredAssetUrl(mapData.file, getMapCandidatePages(mapData));
@@ -202,7 +208,7 @@ const resolveMapImageUrl = async (mapData: MapData): Promise<string | null> => {
     if (cadUrl) return cadUrl;
   }
 
-  // 3. 従来の添付解決(後方互換)。見つからなければ null。
+  // 3. ページ添付の直参照。API なし運用ではこれが正規経路。見つからなければ null。
   const attachmentUrl = await resolveAttachmentUrl(mapData.file, getMapCandidatePages(mapData));
   return attachmentUrl || null;
 };
@@ -254,9 +260,20 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
     title.textContent = '地図ファイルが見つかりません';
     Object.assign(title.style, { fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' });
     const detail = document.createElement('div');
-    detail.innerHTML = `指定された地図 <code style="font-family:monospace;background:#f2f2f2;padding:1px 4px;border-radius:3px;">${mapData.file}</code> が見つかりませんでした。`
-      + '<br>登録名が正しいか確認してください。登録済みの地図は、編集画面の「🗺 地図を作成」から選べます。'
-      + '<br>未登録の図面は、MAP 編集者に登録を依頼してください。';
+    const fileCode = `<code style="font-family:monospace;background:#f2f2f2;padding:1px 4px;border-radius:3px;">${mapData.file}</code>`;
+    // API 有無で原因の切り分けと対処を出し分ける。
+    // - API あり: 登録アセット経由が正規。登録名の確認・登録依頼を促す。
+    // - API なし: 添付直参照が正規経路。ファイル名一致とストックページ(media-library)
+    //   の公開・閲覧権限を促す(お手軽運用ではストックページを閲覧できることが前提)。
+    if (getCadConvertApi()) {
+      detail.innerHTML = `指定された地図 ${fileCode} が見つかりませんでした。`
+        + '<br>登録名が正しいか確認してください。登録済みの地図は、編集画面の「🛠️ 地図を作成」から選べます。'
+        + '<br>未登録の図面は、MAP 編集者に登録を依頼してください。';
+    } else {
+      detail.innerHTML = `指定された地図 ${fileCode} が見つかりませんでした。`
+        + '<br>ファイル名が、地図を保存したページの添付ファイル名と一致しているか確認してください。'
+        + '<br>また、その画像を置いたページ（既定は media-library）が閲覧できる状態か確認してください。';
+    }
     Object.assign(detail.style, { fontSize: '13px', color: '#666', lineHeight: '1.7' });
     notFound.appendChild(title);
     notFound.appendChild(detail);

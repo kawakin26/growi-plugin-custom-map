@@ -625,10 +625,15 @@ const openImageListModal = async (): Promise<void> => {
   const { body } = createModalShell('地図を選択（登録済みアセット）');
 
   // 変換 API(cadConvertApi)未設定だと登録アセットを取得できない。
+  // このお手軽運用では、画像をこのページ(既定 media-library)の添付として置き、
+  // 記法に file="添付ファイル名" を手書きする運用になる。
   if (!getCadConvertApi()) {
     const note = document.createElement('div');
-    note.textContent = '地図アセット API（cadConvertApi）が設定されていません。管理者に設定を依頼してください。';
-    Object.assign(note.style, { color: '#b00020', padding: '20px', textAlign: 'center', fontSize: '13px' });
+    note.innerHTML = '地図アセット API（cadConvertApi）が設定されていません。'
+      + '<br><br>API なしのお手軽運用では、地図画像をページの添付として保存し、'
+      + '記法に <code style="font-family:monospace;background:#f2f2f2;padding:1px 4px;border-radius:3px;">file="添付ファイル名"</code> を直接指定してください。'
+      + '<br>この場合、画像を置いたページ（既定 media-library）は閲覧できる状態にしておく必要があります。';
+    Object.assign(note.style, { color: '#664d03', padding: '20px', fontSize: '13px', lineHeight: '1.7' });
     body.appendChild(note);
     return;
   }
