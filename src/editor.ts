@@ -690,8 +690,14 @@ const openAttachmentImageListModal = async (): Promise<void> => {
   const renderPage = async (path: string, deep = deepCheck.checked): Promise<void> => {
     browseSrc = normalizePagePath(path);
     const currentRequest = ++requestId;
-    info.innerHTML = `ページ（<code style="font-family:monospace;">${browseSrc}</code>）に添付された画像から選びます。`
-      + (deep ? '<br>配下のページも検索しています。' : '<br>親ページやサブページへ移動できます。');
+    info.textContent = 'ページ（';
+    const pathCode = document.createElement('code');
+    pathCode.textContent = browseSrc;
+    Object.assign(pathCode.style, { fontFamily: 'monospace' });
+    info.appendChild(pathCode);
+    info.appendChild(document.createTextNode('）に添付された画像から選びます。'));
+    info.appendChild(document.createElement('br'));
+    info.appendChild(document.createTextNode(deep ? '配下のページも検索しています。' : '親ページやサブページへ移動できます。'));
     loading.style.display = 'block';
     grid.innerHTML = '';
     attachments = [];

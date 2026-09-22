@@ -260,22 +260,31 @@ const openMapModal = async (mapData: MapData): Promise<void> => {
     title.textContent = '地図ファイルが見つかりません';
     Object.assign(title.style, { fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' });
     const detail = document.createElement('div');
-    const fileCode = `<code style="font-family:monospace;background:#f2f2f2;padding:1px 4px;border-radius:3px;">${mapData.file}</code>`;
+    const appendDetailLine = (prefix: string, suffix: string): void => {
+      detail.appendChild(document.createTextNode(prefix));
+      const code = document.createElement('code');
+      code.textContent = mapData.file;
+      Object.assign(code.style, {
+        fontFamily: 'monospace', background: '#f2f2f2', padding: '1px 4px', borderRadius: '3px',
+      });
+      detail.appendChild(code);
+      detail.appendChild(document.createTextNode(suffix));
+      detail.appendChild(document.createElement('br'));
+    };
     // API 有無で原因の切り分けと対処を出し分ける。
-    // - API あり: 登録アセット経由が正規。登録名の確認・登録依頼を促す。
-    // - API なし: 添付直参照が正規経路。ファイル名一致とストックページ(media-library)
-    //   の公開・閲覧権限を促す(お手軽運用ではストックページを閲覧できることが前提)。
+    // 動的なファイル名はtextContentで挿入し、HTMLとして解釈させない。
     if (getCadConvertApi()) {
-      // 変換 API 構成では、原因が「登録名の不一致」「添付名の不一致」「API サーバーの
-      // 停止/未稼働」の複数ありうる。閲覧者からは区別できないため候補を併記する。
-      detail.innerHTML = `指定された地図 ${fileCode} を表示できませんでした。次のいずれかが考えられます。`
-        + '<br>・登録名が正しいか（登録済みの地図は編集画面の「🛠️ 地図を作成」から選べます。未登録の図面は MAP 編集者に登録を依頼してください）'
-        + '<br>・添付で参照している場合、ファイル名が添付ファイル名と一致しているか'
-        + '<br>・変換 API サーバーが稼働しているか（管理者に確認してください）';
+      appendDetailLine('指定された地図 ', ' を表示できませんでした。次のいずれかが考えられます。');
+      detail.appendChild(document.createTextNode('・登録名が正しいか（登録済みの地図は編集画面の「🛠️ 地図を作成」から選べます。未登録の図面は MAP 編集者に登録を依頼してください）'));
+      detail.appendChild(document.createElement('br'));
+      detail.appendChild(document.createTextNode('・添付で参照している場合、ファイル名が添付ファイル名と一致しているか'));
+      detail.appendChild(document.createElement('br'));
+      detail.appendChild(document.createTextNode('・変換 API サーバーが稼働しているか（管理者に確認してください）'));
     } else {
-      detail.innerHTML = `指定された地図 ${fileCode} が見つかりませんでした。`
-        + '<br>ファイル名が、地図を保存したページの添付ファイル名と一致しているか確認してください。'
-        + '<br>また、その画像を置いたページ（既定は media-library）が閲覧できる状態か確認してください。';
+      appendDetailLine('指定された地図 ', ' が見つかりませんでした。');
+      detail.appendChild(document.createTextNode('ファイル名が、地図を保存したページの添付ファイル名と一致しているか確認してください。'));
+      detail.appendChild(document.createElement('br'));
+      detail.appendChild(document.createTextNode('また、その画像を置いたページ（既定は media-library）が閲覧できる状態か確認してください。'));
     }
     Object.assign(detail.style, { fontSize: '13px', color: '#666', lineHeight: '1.7' });
     notFound.appendChild(title);

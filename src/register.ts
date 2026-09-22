@@ -293,9 +293,25 @@ const renderNewTab = (container: HTMLElement, src: string): void => {
   openRegisterFormWith = (file: string, type?: 'cad' | 'image', source = src) => renderRegisterForm(container, file, source, type);
 
   const info = document.createElement('div');
-  info.innerHTML = `「${src}」内の CAD（.dxf / .jww）・画像（.png / .jpg 等）から選び、<b>別名で登録</b>します。`
-    + '<br>CAD は向き（回転）を指定して焼き込み、画像は原本のまま保存します（画像の向きは事前に補正してください）。'
-    + '<br>同じファイルを別名で何個でも登録でき、登録済みには <span style="color:#20a37a;font-weight:bold;">済</span> を表示します。';
+  info.appendChild(document.createTextNode('「'));
+  const sourceCode = document.createElement('code');
+  sourceCode.textContent = src;
+  sourceCode.style.fontFamily = 'monospace';
+  info.appendChild(sourceCode);
+  info.appendChild(document.createTextNode('」内の CAD（.dxf / .jww）・画像（.png / .jpg 等）から選び、'));
+  const registerStrong = document.createElement('b');
+  registerStrong.textContent = '別名で登録';
+  info.appendChild(registerStrong);
+  info.appendChild(document.createTextNode('します。'));
+  info.appendChild(document.createElement('br'));
+  info.appendChild(document.createTextNode('CAD は向き（回転）を指定して焼き込み、画像は原本のまま保存します（画像の向きは事前に補正してください）。'));
+  info.appendChild(document.createElement('br'));
+  info.appendChild(document.createTextNode('同じファイルを別名で何個でも登録でき、登録済みには'));
+  const doneBadge = document.createElement('span');
+  doneBadge.textContent = '済';
+  Object.assign(doneBadge.style, { color: '#20a37a', fontWeight: 'bold' });
+  info.appendChild(doneBadge);
+  info.appendChild(document.createTextNode('を表示します。'));
   Object.assign(info.style, { fontSize: '12px', color: '#666', marginBottom: '10px', lineHeight: '1.6' });
   container.appendChild(info);
 

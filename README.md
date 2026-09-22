@@ -230,6 +230,15 @@ window.GROWI_CUSTOM_MAP_CONFIG = {
 > - **CAD を使わないお手軽運用**、または **API サーバーを止めているとき**は、`cadConvertApi` を設定しない（またはコメントアウトする）でください。この場合、プラグインは自動的に「ストックページ（既定 `/media-library`）の添付画像を直接参照する」お手軽運用モードで動きます（地図の作成・表示・編集とも添付画像で完結します）。
 > - API サーバーを導入・稼働させたうえで CAD 変換や登録アセット配信を使いたいときのみ、`cadConvertApi` を設定してください。
 
+> [!CAUTION]
+> **変換 API を公開する場合のセキュリティ（設置者向け）**
+>
+> `cadConvertApi` が指す変換 API には、登録（`POST /assets`）・削除（`DELETE /assets`）・変換（`POST /convert`）といった **書き込み・処理系エンドポイント** があります。これらを無防備にインターネット公開すると、第三者にアセットを勝手に登録・削除される（＝公開中ページの地図が壊れる）恐れがあります。
+>
+> - 対策は変換 API 側で行います。**このプラグインの設定（`GROWI_CUSTOM_MAP_CONFIG`）に保護用トークンを書かないでください**（カスタムスクリプトは全ページで実行され、閲覧者のブラウザにトークンが露出します）。
+> - ブラウザの「地図アセットの登録」UI を使う運用では、**リバースプロキシ（Apache 等）側で登録・削除パスをアクセス元 IP 制限または BASIC 認証で保護**します。
+> - 具体的な対策（`ADMIN_TOKEN`、`CORS_ORIGINS` の限定、Apache 設定例など）は、変換 API の [growi-cad-convert-api README のセキュリティ節](https://github.com/kawakin26/growi-cad-convert-api#セキュリティ) を参照してください。
+
 ## CAD 図面の利用（任意）
 
 `file` に CAD 図面（`.dxf` / `.jww`）を指定できます。変換は **外部の変換 API** に委ねる設計です。DXF・JWW とも対応しています（変換は API 側 [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) が担当）。
