@@ -325,6 +325,34 @@ GET {cadConvertApi}?file=<CADファイル名>&src=<ページパス>
 > [!IMPORTANT]
 > 添付ファイルの閲覧権限は **添付元ページ** に従います。ストック用ページの閲覧権限が無いユーザーには画像が表示されません。共有したい相手全員が閲覧できる公開範囲でストック用ページを作成してください。
 
+## ドキュメントと例
+
+### 完全なドキュメント
+
+- **[日本語ドキュメント](./docs/ja/)** — Sphinx ベースの完全ドキュメント（HTML/Markdown）
+  - 導入ガイド、ユーザーガイド、記法リファレンス、管理者ガイド、拡張方法
+- **[English Documentation](./docs/en/)** — Full technical documentation in English
+  - Installation, user guide, syntax reference, administration, extending
+
+### 実装例
+
+- **[Usage Examples](./examples/README.md)** — 10 個の実装例とパターン
+  - シンプルなマップから GUI 編集、複数ページ対応、CAD 利用、テンプレート化まで
+
+### 運用ガイド
+
+- **[Production Deployment Checklist](./DEPLOYMENT_CHECKLIST.md)** — 本番環境への展開チェックリスト
+- **[CHANGELOG](./CHANGELOG.md)** — 更新履歴と機能追加記録
+
+### GitHub Release
+
+- **[v1.0.0 Release](https://github.com/kawakin26/growi-plugin-custom-map/releases/tag/v1.0.0)** — 最初の安定版リリース
+
+### GitHub Actions
+
+自動ビルド・デプロイメント:
+- **[Docs Build Workflow](.github/workflows/docs-build.yml)** — 日本語 + 英語ドキュメント自動ビルド（docs/ 変更時）
+
 ## 開発
 
 ### 必要環境
