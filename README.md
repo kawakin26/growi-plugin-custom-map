@@ -346,7 +346,7 @@ GET {cadConvertApi}?file=<CADファイル名>&src=<ページパス>
 
 ### GitHub Release
 
-- **[v1.0.0 Release](https://github.com/kawakin26/growi-plugin-custom-map/releases/tag/v1.0.0)** — 最初の安定版リリース
+- **[v0.1.0 Release](https://github.com/kawakin26/growi-plugin-custom-map/releases/tag/v0.1.0)** — 最初のリリース
 
 ### GitHub Actions
 
