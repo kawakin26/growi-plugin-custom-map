@@ -1,3 +1,7 @@
 node_modules/
 *.log
 .DS_Store
+# ドキュメント（venv とビルド出力）
+docs/.venv/
+docs/ja/_build/
+docs/en/_build/

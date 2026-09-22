@@ -1,0 +1,9 @@
+# ドキュメントビルド用の Python 依存。
+# venv を作って pip install -r docs/requirements.txt でセットアップする。
+sphinx>=9,<10
+myst-parser>=5,<6
+furo
+sphinx-intl
+sphinx-markdown-builder
+linkify-it-py
+
