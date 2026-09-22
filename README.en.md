@@ -249,7 +249,7 @@ window.GROWI_CUSTOM_MAP_CONFIG = {
 >
 > - The countermeasures are done on the conversion API side. **Do not write a protection token in this plugin's settings (`GROWI_CUSTOM_MAP_CONFIG`)** (the custom script runs on all pages, so the token would be exposed in viewers' browsers).
 > - In a setup that uses the browser's "Register Map Asset" UI, **protect the register/delete paths on the reverse proxy (Apache, etc.) side with source-IP restrictions or BASIC authentication**.
-> - For concrete countermeasures (`ADMIN_TOKEN`, restricting `CORS_ORIGINS`, Apache config examples, etc.), see the [Security section of the growi-cad-convert-api README](https://github.com/kawakin26/growi-cad-convert-api#security).
+> - For concrete countermeasures (`ADMIN_TOKEN`, restricting `CORS_ORIGINS`, Apache config examples, etc.), see the [Security section of the growi-cad-convert-api README](https://github.com/kawakin26/growi-cad-convert-api/blob/main/README.en.md#security).
 
 ## Using CAD drawings (optional)
 
