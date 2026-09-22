@@ -355,6 +355,35 @@ GET {cadConvertApi}?file=<CADファイル名>&src=<ページパス>
 
 ## 開発
 
+### 開発ワークフロー
+
+Makefile で開発タスクを簡潔に実行できます：
+
+```bash
+make help              # 全コマンド表示
+make install           # 依存パッケージをインストール
+make dev               # 開発サーバー起動
+make build             # 本番ビルド
+make check-all         # 全チェック実行（型チェック + lint + フォーマット確認 + ビルド）
+make lint              # ESLint でコード品質をチェック
+make lint-fix          # ESLint で自動修正
+make format            # Prettier でコード整形
+make type-check        # TypeScript 型チェック
+```
+
+npm スクリプトを直接実行することもできます：
+
+```bash
+npm run dev            # 開発サーバー起動
+npm run build          # 本番ビルド
+npm run preview        # ビルド結果をプレビュー
+npm run type-check     # TypeScript 型チェック
+npm run lint           # ESLint チェック
+npm run lint:fix       # ESLint 自動修正
+npm run format         # Prettier コード整形
+npm run check-all      # 全チェック実行
+```
+
 ### 必要環境
 
 - Node.js
