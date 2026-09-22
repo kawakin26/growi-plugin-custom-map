@@ -1,369 +1,369 @@
 # growi-plugin-custom-map
 
-[日本語](./README.ja.md) | **English**
+**日本語** | [English](./README.en.md)
 
-A [GROWI](https://growi.org/) plugin that displays pre-uploaded floor plans (such as per-floor maps of a building) by referencing them from within wiki documents using their **original file names**.
+事前にアップロードした平面図（建物内の各フロア図など）を、ウィキ文書内から **オリジナルのファイル名** で参照して表示する [GROWI](https://growi.org/) プラグインです。
 
-You can place multiple markers (like Google Maps pins) on a floor plan and attach a label, reference photos, and a description to each marker. The map opens in a modal and supports moving and zooming via drag, wheel/pan, and pinch.
+平面図の上に複数のマーカー（Google マップのピンのようなもの）を配置し、マーカーごとにラベル・参照写真・説明文を紐付けられます。表示はモーダルで開き、ドラッグ ・ホイール/パン・ ピンチでの移動・拡大縮小に対応しています。
 
-Furthermore, without writing the syntax by hand, you can **place markers by clicking on the floor plan from the GUI (a floating button) in the edit screen, and the syntax is generated and inserted automatically**.
+さらに、記法を手で書かなくても **編集画面の GUI（フローティングボタン）から、平面図をクリックしてマーカーを配置し、記法を自動生成して挿入** できます。
 
-## Features
+## 主な機能
 
-### Viewing
-- Reference attached images by their **original file name at upload time** (no need to be aware of random attachment IDs)
-- Place **multiple markers** on a single floor plan. Specify **position, label, reference photos, color, and description** per marker
-- Specify the **center coordinates and magnification** of the initial view to zoom into any area
-- Rotate the entire floor plan **in 90° steps** (to correct orientation mismatches from photographing/scanning; works for both CAD and regular images; markers and labels always stay upright even when rotated)
-- **Drag / one-finger pan** and **wheel / pinch zoom** inside the modal (smartphone-friendly)
-- **Left-click / tap a marker or label to toggle minimize / restore** (lets you check parts hidden by labels). While minimized, the label is hidden and the pin **blinks** to indicate its position. It **auto-restores** after a set number of seconds (default 15)
-- **Right-click / long-tap a marker or label to pop up its reference photos and description**
-- A marker with a **description / note (`desc`)** set has a **blinking pin** to signal its presence
-- The label text color is **automatically chosen as black / white** according to the background color (readable even with light-colored labels)
+### 表示
+- 添付画像を **アップロード時のオリジナルファイル名** で参照（ランダムな添付 ID を意識しなくてよい）
+- 1 つの平面図に **複数マーカー** を配置。マーカーごとに **位置・ラベル・参照写真・色・説明文** を指定
+- 初期表示の **中心座標と倍率** を指定して、任意の範囲を拡大表示
+- 平面図全体を **90° 単位で回転**して表示（撮影・スキャンの向きずれを補正。CAD・通常画像とも対応。マーカーとラベルは回転しても常に正立）
+- モーダル内で **ドラッグ / 1 本指のパン**、**ホイール / ピンチのズーム**（スマートフォン対応）
+- マーカー / ラベルの **左クリック・タップで最小化 / 再表示をトグル**（ラベルで隠れた部分を確認できる）。最小化中はラベルを隠し、ピンを **点滅** させて位置を示す。指定秒後に **自動復帰**（既定 15 秒）
+- マーカー / ラベルの **右クリック・ロングタップで参照写真・説明文をポップアップ**
+- **説明文 / 注意書き（`desc`）** を設定したマーカーは **ピンが点滅** して存在を知らせる
+- ラベルの文字色は背景色に応じて **黒 / 白を自動選択**（淡色ラベルでも読みやすい）
 
-### Editing (GUI)
-- Display **floating buttons "🛠️ 地図を作成 (Create Map)" and "🖊️ 地図を編集 (Edit Map)"** on the edit screen
-- **Create Map (new)**: Select a floor plan from the **list of registered map assets** (CAD/images registered by a MAP editor) (filterable by registered name or original file name). Even if the stock page is kept private, general editors can still choose a map
-- **Edit Map (existing)**: List the existing `:::custom-map` blocks in the current page, select one, and **edit it again in the GUI**. On confirmation, the original syntax is **overwritten in place** (the page reloads)
-- A guard against accidental insertion inside syntax: when the cursor is inside an existing `:::custom-map`, pressing "🛠️ 地図を作成 (Create Map)" shows a message prompting you to use "Edit Map" instead of inserting a new block
-- **Place markers by clicking** while **zooming / panning** the floor plan (coordinates are calculated automatically, with fine numeric adjustment available)
-- In the side panel, edit **label, reference photos, color (preset palette), description, and coordinates**, **select / delete** markers, and specify the whole-map settings (launch button text, auto-restore seconds, initial view, and **rotation**)
-- **Switch rotation (0 / 90 / 180 / 270°) with buttons**, reflected instantly in the preview
-- **On confirmation, the `:::custom-map` syntax is inserted at the cursor position**
+### 編集（GUI）
+- 編集画面に **フローティングボタン「🛠️ 地図を作成」「🖊️ 地図を編集」** を表示
+- **地図を作成（新規）**: **登録済みの地図アセット一覧**（MAP 編集者が登録した CAD・画像）から平面図を選択（登録名・元ファイル名で絞り込み可）。ストック用ページを秘匿しても、一般編集者が地図を選べる
+- **地図を編集（既存）**: このページ内の既存 `:::custom-map` を一覧表示し、選んで **GUI で編集し直す**。確定すると元の記法を**同じ場所に上書き保存**する（ページが再読み込みされる）
+- 記法の中への誤挿入を防ぐガード: カーソルが既存の `:::custom-map` の中にあるとき「🛠️ 地図を作成」を押すと、新規挿入せず「地図を編集」を促すメッセージを表示する
+- 平面図を **ズーム / パン** しながら、**クリックでマーカーを配置**（座標は自動計算、数値で微調整も可能）
+- サイドパネルで **ラベル・参照写真・色（プリセットパレット）・説明文・座標** を編集、マーカーの **選択 / 削除**、地図全体の設定（起動ボタン文言・自動復帰秒・初期表示・**回転**）を指定
+- **回転（0 / 90 / 180 / 270°）をボタンで切り替え**、プレビューに即反映
+- **確定するとカーソル位置に `:::custom-map` 記法を挿入**
 
-### CAD Drawings (optional)
-- Display CAD drawings (`.dxf` / `.jww`) by **converting them to SVG via a conversion API** (**both DXF and JWW supported**)
-- When the conversion API is unset, not running, or conversion fails, it **falls back** to the normal image workflow (no configuration is needed if you don't use CAD)
-- You can **register a drawing with a confirmed orientation under a different name** (the "Register Map Asset" UI described later). For users who don't have CAD software, a MAP editor can fix the reference orientation in advance
-- The conversion API is provided by a separate repository, [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api)
+### CAD 図面（任意）
+- CAD 図面（`.dxf` / `.jww`）を **変換 API 経由で SVG 化して表示**（**DXF・JWW 両対応**）
+- 変換 API が未設定・未稼働・変換失敗のときは通常の画像運用に **フォールバック**（CAD を使わない運用では設定不要）
+- CAD の **向きを確定した図面を別名で登録**できる（後述の「地図アセットの登録」UI）。CAD ソフトを持たない利用者のために、MAP 編集者があらかじめ基準の向きを直しておける
+- 変換 API は別リポジトリ [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) を参照
 
-### Register Map Asset (CAD/Image / optional)
-- On the stock page (default `/media-library`), display the **floating button "📋 地図アセットの登録 (Register Map Asset)"** (only when the conversion API is configured)
-- **"Register Drawing" tab**: Lists the CAD (`.dxf` / `.jww`) and **images (`.png` / `.jpg`, etc.)** in the page (**filterable by file name**, with a type badge, and registered ones marked with **color coding + a "done" badge**). You can **register under a different name**
-  - **CAD**: Confirm the `0/90/180/270°` orientation in the preview and register with that orientation **baked into the SVG**. You can register the same drawing at multiple angles as many times as you like
-  - **Image**: Register by **importing the original into the API as-is** (no rotation; correct the orientation in advance with image-editing software). It is then **delivered via the API**
-- **"Registered List" tab**: List and review registered assets (view only). From each asset's **"Re-register at another angle" / "Re-register under another name"**, you can register again while carrying over the source file
-- A registered asset is displayed simply by specifying its **registered name** in the syntax's `file`
+### 地図アセットの登録（CAD・画像／任意）
+- ストック用ページ（既定 `/media-library`）で **フローティングボタン「📋 地図アセットの登録」** を表示（変換 API 設定時のみ）
+- **「図面を登録」タブ**: ページ内の CAD（`.dxf` / `.jww`）と **画像（`.png` / `.jpg` 等）** を一覧（**ファイル名で絞り込み**、種別バッジ、登録済みは **色分け＋「済」バッジ**）。**別名で登録**できる
+  - **CAD**: `0/90/180/270°` の向きをプレビューで確認し、その向きを **SVG に焼き込んで**登録。同じ図面を角度違いで何個でも登録できる
+  - **画像**: 原本のまま **API に取り込んで登録**（回転なし。向きは事前に画像編集ソフトで補正）。以後は **API 経由で配信**される
+- **「登録済み一覧」タブ**: 登録済みのアセットを一覧・確認（閲覧のみ）。各アセットの **「別角度で再登録」/「別名で再登録」** から、元ファイルを引き継いで別名登録できる
+- 登録したアセットは、記法の `file` に **登録名** を指定するだけで表示される
 
 > [!TIP]
-> Because **registered assets are delivered via the API**, even if you restrict the stock page (`/media-library`) to be **viewable only by the editing group**, the registered maps (CAD/images) are still shown to viewers. This is useful when you want to keep media-library private while still showing the maps (it does not depend on the source file's attachment permissions).
+> **登録アセットは API 経由で配信される**ため、ストック用ページ（`/media-library`）を **編集グループのみ閲覧可**に絞っても、登録した地図（CAD・画像）は閲覧者に表示されます。media-library を秘匿しつつ地図だけ見せたい運用に使えます（元ファイルの添付権限に依存しません）。
 
 > [!IMPORTANT]
-> **How a map is referenced comes in two tiers depending on "whether the conversion API exists."**
+> **地図の参照方法は「変換 API の有無」で二段構えになります。**
 >
-> | | Image storage | Reference path | Keeping the stock page (media-library) private |
+> | | 画像の保存先 | 参照経路 | ストックページ（media-library）の秘匿 |
 > |---|---|---|---|
-> | **With conversion API** | The API server's storage (imported at registration) | API delivery (independent of GROWI permissions) | **Possible** (the map is shown even if viewable only by the editing group) |
-> | **Without conversion API (easy setup)** | GROWI page attachments | GROWI standard `/attachment/{id}` (**follows view permissions**) | **Not possible** (you must be able to view the page holding the image, i.e., it must be public) |
+> | **変換 API あり** | API サーバーのストレージ（登録時に取り込み） | API 配信（GROWI 権限とは独立） | **可能**（編集グループのみ閲覧可でも地図は表示される） |
+> | **変換 API なし（お手軽運用）** | GROWI のページ添付 | GROWI 標準の `/attachment/{id}`（**閲覧権限に従う**） | **不可**（画像を置いたページを閲覧できる＝公開しておく必要がある） |
 >
-> In the no-API setup, you must keep the stock page holding the map images (default `/media-library`) viewable. Specify `file="<attachment file name>"` directly in the syntax.
+> API なし運用では、地図画像を置いたストックページ（既定 `/media-library`）を閲覧できる状態にしておく必要があります。記法には `file="添付ファイル名"` を直接指定します。
 >
-> Note that keeping media-library private is originally an organizational measure to "not show the backstage," not a security boundary (neither registered assets nor attachments protect against a third party who knows the delivery URL). If you don't need CAD conversion and want an easy setup, it's fine to give up privacy and make the stock page public.
+> なお、media-library の秘匿はもともと「舞台裏を見せない」ための整理であり、セキュリティ境界ではありません（登録アセット・添付いずれも配信 URL を知る第三者への防御にはなりません）。CAD 変換が不要でお手軽に使いたい場合は、秘匿を諦めてストックページを公開する運用で問題ありません。
 
 > [!NOTE]
-> **Deleting a registration cannot be done from the UI.** It risks breaking maps on existing pages that reference the registered name, and it is difficult to safely confirm that no page references it (deletion is planned for a future server management tool that involves searching usages and backups). To change the orientation, **re-register under a different name** instead of deleting.
+> **登録の削除は UI から行えません。** 登録名を参照している既存ページの地図を壊す恐れがあり、どのページからも未参照であることを安全に確認するのが難しいためです（削除は将来、使用箇所の検索・バックアップを伴うサーバー管理ツールで対応予定）。向きを変えたい場合は削除ではなく **別名で再登録** してください。
 
-## Installation
+## インストール
 
-Add it as a plugin from the GROWI admin screen.
+GROWI の管理画面からプラグインとして追加します。
 
-1. Open the GROWI admin screen → **Plugins**
-2. Register this repository's URL
+1. GROWI 管理画面 → **プラグイン** を開く
+2. このリポジトリの URL を登録する
 
    ```
    https://github.com/kawakin26/growi-plugin-custom-map
    ```
-3. After installation, enable the plugin
+3. インストール後、プラグインを有効化する
 
 > [!NOTE]
-> Operation requires the build artifacts (`assets/client-entry-*.js` and `.vite/manifest.json` under `dist/`). If you change the source, build it with the steps described later, commit it, and then reinstall it on the GROWI side.
+> 動作にはビルド成果物（`dist/` 配下の `assets/client-entry-*.js` と `.vite/manifest.json`）が必要です。ソースを変更した場合は後述の手順でビルドし、コミットしてから GROWI 側で再インストールしてください。
 
 > [!IMPORTANT]
-> Do not append `.git` to the end of the repository URL at installation time. GROWI will get a 404 and fail when it assembles the ZIP download path.
+> インストール時のリポジトリ URL の末尾に `.git` を付けないでください。GROWI が ZIP ダウンロード用パスを組み立てる際に 404 となり失敗します。
 
-## Usage (GUI editing)
+## 使い方（GUI 編集）
 
-You can create maps in the GUI without writing the syntax by hand.
+記法を手書きせずに、GUI で地図を作れます。
 
-1. Open the page in **edit mode** and **place the cursor where you want to insert the syntax** (the syntax is inserted at the **cursor position just before** you click the button)
-2. Click the **"🛠️ 地図を作成 (Create Map)"** button at the bottom right of the screen
-3. Select a floor plan (selecting it auto-fills the syntax's `file`)
-   - **With conversion API**: Select from the **list of registered map assets** (CAD/images registered by a MAP editor) (filterable by registered name or original file name). `file` is filled with the **registered name**
-   - **Without conversion API (easy setup)**: Select from the **attached-image list** of the stock page (default `/media-library`). `file` is filled with the **attachment file name**
-4. **Click on the floor plan to place markers** (you can zoom in with wheel / pinch to specify fine positions)
-5. In the right panel, enter the selected marker's **label, reference photos, color, and description** (fine adjustment of X/Y coordinates is also possible). You can **delete** unneeded markers
-6. If needed, adjust the **whole-map settings** (launch button text, auto-restore seconds, initial view center/magnification, rotation). **Rotation** switches with the `0° / 90° / 180° / 270°` buttons and is reflected in the preview immediately
-7. With **"Confirm and insert"**, the `:::custom-map` syntax is **inserted at the cursor position**
+1. ページを **編集モード** で開き、**記法を挿入したい位置にカーソルを置く**（記法は、ボタンをクリックした**直前のカーソル位置**に挿入されます）
+2. 画面右下の **「🛠️ 地図を作成」** ボタンをクリック
+3. 平面図を選ぶ（選ぶと記法の `file` が自動で入る）
+   - **変換 API あり**: **登録済みの地図アセット一覧**（MAP 編集者が登録した CAD・画像）から選ぶ（登録名・元ファイル名で絞り込み可）。`file` には **登録名** が入る
+   - **変換 API なし（お手軽運用）**: ストック用ページ（既定 `/media-library`）の **添付画像一覧** から選ぶ。`file` には **添付ファイル名** が入る
+4. 平面図の上を **クリックしてマーカーを配置**（ホイール / ピンチで拡大して細かい位置も指定できる）
+5. 右のパネルで、選択中マーカーの **ラベル・参照写真・色・説明文** を入力（座標 X/Y の微調整も可能）。不要なマーカーは **削除** できる
+6. 必要なら **地図全体の設定**（起動ボタンの文言、自動復帰秒、初期表示の中心・倍率、回転）を調整。**回転**は `0° / 90° / 180° / 270°` のボタンで切り替えると、プレビューにすぐ反映される
+7. **「確定して挿入」** で、`:::custom-map` 記法が **カーソル位置に挿入** される
 
-The inserted syntax can also be edited by hand (see the next section for the syntax spec).
+挿入された記法は、そのまま手で編集することもできます（記法の仕様は次項）。
 
 > [!IMPORTANT]
-> The syntax is inserted at the **cursor position just before you click the "🛠️ 地図を作成 (Create Map)" button**. To make it land where you intend, **check the cursor position before pressing the button** (place the cursor on the target line/paragraph, then click the button). When the cursor is inside an existing `:::custom-map`, a new block is not inserted; instead, a message prompting you to use "Edit Map" is shown to prevent accidental insertion.
+> 記法は **「🛠️ 地図を作成」ボタンをクリックした直前のカーソル位置** に挿入されます。意図した場所に入るよう、**ボタンを押す前にカーソル位置を確認**してください（挿入したい行・段落にカーソルを置いてからボタンをクリックします）。カーソルが既存の `:::custom-map` の中にあるときは、誤挿入を防ぐため新規挿入されず「地図を編集」を促すメッセージが表示されます。
 
 > [!NOTE]
-> **With the conversion API**, the GUI's floor-plan list is obtained from the **map assets registered in the API** (`GET /assets`). This is so that general editors can still choose a map even in a private setup where the stock page (`/media-library`) is restricted to be viewable only by the editing group. If you want to use a drawing that isn't listed here, ask a MAP editor to register it from "Register Map Asset."
+> **変換 API あり**の場合、GUI の平面図一覧は **API に登録済みの地図アセット**（`GET /assets`）から取得します。ストック用ページ（`/media-library`）を編集グループのみ閲覧可に絞る秘匿運用でも、一般編集者が地図を選べるようにするためです。ここに無い図面を使いたい場合は、MAP 編集者に「地図アセットの登録」からの登録を依頼してください。
 >
-> **Without the conversion API**, the **attached-image list** of the stock page (default `/media-library`) is shown as-is. In this setup, the images in the list follow the stock page's view permissions, so you must keep the stock page viewable (i.e., not private).
+> **変換 API なし**の場合は、ストック用ページ（既定 `/media-library`）の **添付画像一覧** をそのまま表示します。この運用では一覧に出る画像がストックページの閲覧権限に従うため、ストックページを閲覧できる状態（＝秘匿しない）にしておく必要があります。
 
-### Editing an existing map
+### 既存の地図を編集する
 
-You can re-edit a map already inserted in a page from the GUI.
+ページに挿入済みの地図を、GUI で編集し直せます。
 
-1. Open the page in **edit mode**
-2. Click the **"🖊️ 地図を編集 (Edit Map)"** button at the bottom right of the screen
-3. From the **list of maps in this page** (`:::custom-map` blocks), select the map you want to edit
-4. Edit markers (add / move / delete), labels, colors, descriptions, rotation, initial view, etc. in the GUI
-5. With **"Save changes"**, the original syntax is **overwritten in place** (the page reloads after saving)
+1. ページを **編集モード** で開く
+2. 画面右下の **「🖊️ 地図を編集」** ボタンをクリック
+3. **このページ内の地図一覧**（`:::custom-map` ブロック）から、編集したい地図を選ぶ
+4. マーカーの追加・移動・削除、ラベル・色・説明文・回転・初期表示などを GUI で編集
+5. **「変更を保存」** で、元の記法が **同じ場所に上書き保存** される（保存後にページが再読み込みされる）
 
 > [!IMPORTANT]
-> "Edit Map" targets the **saved page body**. If you have unsaved changes while editing, save the page first, then use "Edit Map" (to avoid losing the unsaved changes).
+> 「地図を編集」は **保存済みのページ本文** を対象にします。編集中に未保存の変更がある場合は、先にページを保存してから「地図を編集」を使ってください（未保存分が失われるのを防ぐため）。
 
 > [!NOTE]
-> The list shows only maps that reference a registered asset (registered name) as editable targets. Maps using the old scheme (directly referencing a raw file name in media-library) are shown as "not a registered asset" and cannot be edited. In that case, recreate them with the new scheme using "Create Map."
+> 一覧には、登録アセット（登録名）を参照している地図のみが編集対象として表示されます。古い方式（media-library の生ファイル名を直接参照）の地図は「登録アセットではありません」と表示され編集できません。その場合は「地図を作成」で新方式に作り直してください。
 
-## Usage (writing the syntax directly)
+## 使い方（記法を直接書く）
 
-Instead of using the GUI, you can write the Markdown [directive syntax](https://github.com/remarkjs/remark-directive) directly.
+GUI を使わず、Markdown の [ディレクティブ記法](https://github.com/remarkjs/remark-directive) を直接書くこともできます。
 
 ````md
-:::custom-map{file="1F_floorplan.png" cx="50" cy="40" scale="2" rotate="90" link="Open the 1F guide map" restore="15"}
-- x=30 y=40 label="Reception" photo="reception.jpg" color="#ff3b30"
-- x=70 y=55 label="Meeting Room A" photo="room_a.jpg" desc="Reservation required|Ext. 101"
-- x=20 y=80 label="Emergency Exit" photo="exit.jpg" color="#34c759" desc="Keep locked|Contact the security office at night"
+:::custom-map{file="1F平面図.png" cx="50" cy="40" scale="2" rotate="90" link="1階の案内図を開く" restore="15"}
+- x=30 y=40 label="受付" photo="reception.jpg" color="#ff3b30"
+- x=70 y=55 label="会議室A" photo="room_a.jpg" desc="予約制|内線 101"
+- x=20 y=80 label="非常口" photo="exit.jpg" color="#34c759" desc="施錠注意|夜間は警備室へ連絡"
 :::
 ````
 
-- The attributes of the container (`:::custom-map{ ... }`) are the **whole-floor-plan settings**
-- Each **bullet-list line in the body corresponds to one marker**
+- コンテナ（`:::custom-map{ ... }`）の属性が **平面図全体の設定**
+- 本文の **箇条書き 1 行が 1 つのマーカー** に対応します
 
-### Whole-floor-plan settings (container attributes)
+### 平面図全体の設定（コンテナ属性）
 
-| Attribute | Description | Default |
+| 属性 | 説明 | 省略時 |
 |------|------|--------|
-| `file` | The floor plan's **registered asset name** (**required/recommended**; auto-filled when selected in the GUI). For backward compatibility, an attachment's original file name (`.png` / `.dxf` / `.jww`, etc.) can also be specified, but it may be unresolvable in a private setup | — |
-| `src` | The path of the reference page to look for the floor-plan image | Default page (see below) |
-| `cx` | Center X coordinate of the initial view (% of the image, 0–100) | `50` |
-| `cy` | Center Y coordinate of the initial view (% of the image, 0–100) | `50` |
-| `scale` | Initial magnification. A factor relative to the magnification at which the image fits the viewport | `1` |
-| `rotate` | Rotation angle of the whole floor plan (one of `0` / `90` / `180` / `270`; clockwise, degrees). Used to correct orientation mismatches | `0` |
-| `link` | The text of the launch button that opens the floor plan | `マップを開く` (Open the map) |
-| `restore` | Time (seconds) until a minimized marker auto-restores | `15` |
-| `pinSize` | Marker pin diameter (px, common to the whole map). Clamped to `6`–`48` | `12` |
-| `labelSize` | Marker label font size (px, common to the whole map). Clamped to `8`–`40` | `12` |
+| `file` | 平面図の **登録アセット名**（**必須・推奨**。GUI で選ぶと自動で入る）。後方互換として添付のオリジナルファイル名（`.png` / `.dxf` / `.jww` 等）も指定可だが、秘匿運用では解決できないことがある | — |
+| `src` | 平面図画像を探す参照ページのパス | 規定ページ（後述） |
+| `cx` | 初期表示の中心 X 座標（画像に対する %、0〜100） | `50` |
+| `cy` | 初期表示の中心 Y 座標（画像に対する %、0〜100） | `50` |
+| `scale` | 初期倍率。画像が表示窓に収まる倍率に対する係数 | `1` |
+| `rotate` | 平面図全体の回転角（`0` / `90` / `180` / `270` のいずれか。時計回り、度）。向きずれの補正に使う | `0` |
+| `link` | 平面図を開く起動ボタンのテキスト | `マップを開く` |
+| `restore` | 最小化したマーカーが自動で復帰するまでの時間（秒） | `15` |
+| `pinSize` | マーカーのピン径（px、マップ全体共通）。`6`〜`48` にクランプ | `12` |
+| `labelSize` | マーカーのラベル文字サイズ（px、マップ全体共通）。`8`〜`40` にクランプ | `12` |
 
-### Per-marker settings (bullet list)
+### 各マーカーの設定（箇条書き）
 
-| Key | Description | Default |
+| キー | 説明 | 省略時 |
 |------|------|--------|
-| `x` | Marker's horizontal position (% of the image, 0–100, **required**) | `50` |
-| `y` | Marker's vertical position (% of the image, 0–100, **required**) | `50` |
-| `label` | Label text shown on the marker | none |
-| `photo` | Original file name of the reference photo shown on right-click / long-tap | none |
-| `photoSrc` | The page path to look for the reference photo | The page where the syntax is written → the map's resolution target |
-| `desc` | Description / note (line breaks with `\|`). When set, the pin **blinks** and it is shown in the right-click / long-tap popup | none |
-| `color` | Color of the pin and label (CSS color) | `#ff3b30` |
+| `x` | マーカーの横位置（画像に対する %、0〜100、**必須**） | `50` |
+| `y` | マーカーの縦位置（画像に対する %、0〜100、**必須**） | `50` |
+| `label` | マーカーに表示するラベルテキスト | なし |
+| `photo` | 右クリック / ロングタップで表示する参照写真のオリジナルファイル名 | なし |
+| `photoSrc` | 参照写真を探すページのパス | 記法を書いたページ → 地図の解決先 |
+| `desc` | 説明文 / 注意書き（`\|` で改行）。設定するとピンが**点滅**し、右クリック / ロングタップのポップアップに表示される | なし |
+| `color` | ピンとラベルの色（CSS カラー） | `#ff3b30` |
 
 > [!TIP]
-> If a value contains spaces, enclose it in double quotes (`"..."`) (e.g., `label="Meeting Room 1"`).
+> 値にスペースを含む場合はダブルクォート（`"..."`）で囲ってください（例: `label="第1会議室"`）。
 
-## Operations (viewing modal)
+## 操作方法（表示モーダル）
 
-| Operation | Behavior |
+| 操作 | 動作 |
 |------|------|
-| Click the launch button | Show the floor plan in a modal |
-| Drag / one-finger swipe in the modal | Move the view (pan) |
-| Wheel / two-finger pinch | Zoom in / out centered on the cursor (midpoint) |
-| Left-click / tap a marker or label | Minimize / restore that marker and label (toggle) |
-| Right-click / long-tap a marker or label | Pop up the reference photos and description |
-| Click the background / × button | Close |
+| 起動ボタンをクリック | 平面図をモーダルで表示 |
+| モーダル内でドラッグ / 1 本指スワイプ | 表示位置を移動（パン） |
+| ホイール / 2 本指ピンチ | カーソル（中点）を中心に拡大 / 縮小（ズーム） |
+| マーカー / ラベルを左クリック・タップ | そのマーカーとラベルを最小化 / 再表示（トグル） |
+| マーカー / ラベルを右クリック・ロングタップ | 参照写真・説明文をポップアップ表示 |
+| 背景クリック / × ボタン | 閉じる |
 
-A minimized marker hides its label and its pin enters a blinking state. The pin diameter at this time is a fixed value unrelated to `pinSize` (default 24px, changeable with `minimizedPinSize`), slightly larger so its position is clear and easy to tap even when the label is gone. After the number of seconds specified by `restore` (default 15) elapses, it automatically returns to normal.
+最小化したマーカーはラベルを隠し、ピンが点滅した状態になります。このときのピン径は `pinSize` とは無関係の固定値（既定 24px、`minimizedPinSize` で変更可）で、ラベルが消えても位置が分かり押しやすいようやや大きめです。`restore` で指定した秒数（既定 15 秒）が経過すると自動的に元へ戻ります。
 
-## Preparing images and the stock page
+## 画像の準備とストック用ページ
 
-You can consolidate images on a shared **stock page** and reference them by file name from any page.
+画像は、共有用の **ストック用ページ** に集約しておき、任意のページからファイル名で参照する運用ができます。
 
-- Specify the **original file name at upload time** for `file` / `photo`
-- Attach the images to the reference page (whether stored on S3, GCS, locally, or in MongoDB, the reference URL is unified to the `/attachment/{id}` format, so behavior is the same)
+- `file` / `photo` には、アップロード時の **オリジナルファイル名** を指定します
+- 画像は参照先ページに **添付** しておきます（保存先が S3・GCS・ローカル・MongoDB のいずれでも、参照 URL は `/attachment/{id}` 形式に統一されるため動作は同じです）
 
-### Default stock page
+### 規定のストック用ページ
 
-When `src` is omitted, the floor-plan image is looked up on the `/media-library` page by default. If you attach floor plans there together, each page can reference them just by specifying `file`. The GUI editor's image list also shows the images on this page.
+`src` を省略したときの平面図画像の参照先は、既定で `/media-library` ページです。ここに平面図をまとめて添付しておけば、各ページでは `file` を指定するだけで参照できます。GUI 編集の画像一覧も、このページの画像を表示します。
 
-If you want to change the default page name or use the CAD conversion API, specify `defaultSrc` / `cadConvertApi` in the **settings (`GROWI_CUSTOM_MAP_CONFIG`)** described later. When unset, `defaultSrc` uses `/media-library` and the CAD conversion feature is off.
+規定ページ名を変更したい場合や CAD 変換 API を使う場合は、後述の **設定（`GROWI_CUSTOM_MAP_CONFIG`）** で `defaultSrc` / `cadConvertApi` を指定します。未設定の場合、`defaultSrc` は `/media-library` が使われ、CAD 変換機能はオフになります。
 
-## Settings (`GROWI_CUSTOM_MAP_CONFIG`)
+## 設定（`GROWI_CUSTOM_MAP_CONFIG`）
 
-Changing the default stock page and using the CAD conversion API are done via a global setting called `window.GROWI_CUSTOM_MAP_CONFIG`. **This setting is optional** and works even when unset (for the image workflow).
+規定ストックページの変更や CAD 変換 API の利用は、`window.GROWI_CUSTOM_MAP_CONFIG` というグローバル設定で行います。**この設定は任意** で、未設定でも（画像運用なら）動作します。
 
-### Where to write it
+### どこに書くか
 
-Paste and save the following JavaScript in the GROWI admin screen's **Customize screen (`/admin/customize`) → "Custom script"** field. The setting is loaded on all pages.
+GROWI 管理画面の **カスタマイズ画面（`/admin/customize`）→ 「カスタムスクリプト」** 欄に、次の JavaScript を貼り付けて保存します。設定は全ページに読み込まれます。
 
 ```js
 window.GROWI_CUSTOM_MAP_CONFIG = {
-  // Default stock page to look for floor plans and photos. Defaults to /media-library.
+  // 平面図・写真を探す既定のストックページ。省略時は /media-library。
   defaultSrc: '/media-library',
 
-  // CAD conversion API endpoint. Set this only when you use CAD (.dxf/.jww).
-  // Include up to the conversion endpoint (/convert). If unset, the CAD feature is off.
-  // * When the API server is not deployed or is stopped, do not set this line (or comment
-  //   it out as below). Leaving only the setting makes behavior unstable (see the note below).
-  // cadConvertApi: 'https://<same domain as GROWI>/cad/convert',
+  // CAD 変換 API のエンドポイント。CAD(.dxf/.jww)を使う場合のみ設定する。
+  // 末尾は変換エンドポイント(/convert)まで含める。未設定なら CAD 機能はオフ。
+  // ※ API サーバーが未導入・停止中のときは、この行を設定しない(または下のように
+  //   コメントアウトする)こと。設定だけ残すと動作が不安定になる(下の注意書き参照)。
+  // cadConvertApi: 'https://<GROWIと同じドメイン>/cad/convert',
 
-  // Pin diameter (px) in the minimized (label-hidden, blinking) state. A fixed value
-  // unrelated to the syntax's pinSize. Defaults to 24. Clamped to 8–64.
+  // 最小化(ラベル非表示・点滅)状態のピン径(px)。記法の pinSize とは無関係の固定値。
+  // 省略時は 24。8〜64 にクランプ。
   minimizedPinSize: 24,
 };
 ```
 
 > [!NOTE]
-> After saving, reload the page (hard-reload if necessary) to apply. Since the custom script runs on all pages, writing just the assignment to `window.GROWI_CUSTOM_MAP_CONFIG` is enough.
+> 保存後、ページを再読み込み（必要ならハードリロード）すると反映されます。カスタムスクリプトは全ページで実行されるため、`window.GROWI_CUSTOM_MAP_CONFIG` の代入だけを書けば十分です。
 
-### Each item
+### 各項目
 
-| Key | Description | Default |
+| キー | 説明 | 省略時 |
 |------|------|--------|
-| `defaultSrc` | The stock page path to look for images when `src` / `photoSrc` is omitted. The GUI editor's image list also looks here | `/media-library` |
-| `cadConvertApi` | The `/convert` endpoint URL of the CAD conversion API. When set, `.dxf` / `.jww` are converted and displayed. If unset, the CAD feature is off | none |
-| `minimizedPinSize` | Pin diameter (px) in the minimized (label-hidden, blinking) state. A fixed value unrelated to the syntax's `pinSize`. Clamped to `8`–`64` | `24` |
+| `defaultSrc` | `src` / `photoSrc` 省略時に画像を探すストックページのパス。GUI 編集の画像一覧もここを見る | `/media-library` |
+| `cadConvertApi` | CAD 変換 API の `/convert` エンドポイント URL。設定すると `.dxf` / `.jww` を変換して表示する。未設定なら CAD 機能オフ | なし |
+| `minimizedPinSize` | 最小化（ラベル非表示・点滅）状態のピン径（px）。記法の `pinSize` とは無関係の固定値。`8`〜`64` にクランプ | `24` |
 
 > [!TIP]
-> If you place the conversion API on a **subpath of the same domain as GROWI** (e.g., `https://gw.example.com/cad/convert`) via a reverse proxy, you can use `cadConvertApi` without worrying about CORS. For configuration details, see [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api).
+> `cadConvertApi` は、変換 API を **GROWI と同じドメインのサブパス**（例 `https://gw.example.com/cad/convert`）にリバースプロキシで配置すると、CORS を気にせず使えます。設定の詳細は [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) を参照してください。
 
 > [!WARNING]
-> **When the conversion API server is not deployed or is stopped, do not set `cadConvertApi` (comment out the setting line).**
+> **変換 API サーバーが未導入または停止中のときは、`cadConvertApi` を設定しない（設定行をコメントアウトする）でください。**
 >
-> When `cadConvertApi` is set, the plugin switches to behavior that assumes the API exists, such as "display via registered assets" and "the registered-asset list in Create/Edit Map." In this state, if the API server is stopped, behavior becomes unstable: image resolution fails so maps don't display, lists can't be fetched, and so on.
+> `cadConvertApi` を設定すると、プラグインは「登録アセット経由の表示」「地図を作成／編集での登録アセット一覧」など、API があることを前提とした動作に切り替わります。この状態で API サーバーが停止していると、画像の解決に失敗して地図が表示されない、一覧が取得できないなど、動作が不安定になります。
 >
-> - For the **easy setup that doesn't use CAD**, or **when the API server is stopped**, do not set `cadConvertApi` (or comment it out). In this case, the plugin automatically operates in the easy-setup mode of "directly reference the attached images of the stock page (default `/media-library`)" (map creation, display, and editing all complete with attached images).
-> - Set `cadConvertApi` only when you have deployed and are running the API server and want to use CAD conversion or registered-asset delivery.
+> - **CAD を使わないお手軽運用**、または **API サーバーを止めているとき**は、`cadConvertApi` を設定しない（またはコメントアウトする）でください。この場合、プラグインは自動的に「ストックページ（既定 `/media-library`）の添付画像を直接参照する」お手軽運用モードで動きます（地図の作成・表示・編集とも添付画像で完結します）。
+> - API サーバーを導入・稼働させたうえで CAD 変換や登録アセット配信を使いたいときのみ、`cadConvertApi` を設定してください。
 
 > [!CAUTION]
-> **Security when publishing the conversion API (for operators)**
+> **変換 API を公開する場合のセキュリティ（設置者向け）**
 >
-> The conversion API that `cadConvertApi` points to has **write/processing endpoints** such as register (`POST /assets`), delete (`DELETE /assets`), and convert (`POST /convert`). If you expose these to the internet unprotected, a third party may register/delete assets at will (i.e., break the maps on published pages).
+> `cadConvertApi` が指す変換 API には、登録（`POST /assets`）・削除（`DELETE /assets`）・変換（`POST /convert`）といった **書き込み・処理系エンドポイント** があります。これらを無防備にインターネット公開すると、第三者にアセットを勝手に登録・削除される（＝公開中ページの地図が壊れる）恐れがあります。
 >
-> - The countermeasures are done on the conversion API side. **Do not write a protection token in this plugin's settings (`GROWI_CUSTOM_MAP_CONFIG`)** (the custom script runs on all pages, so the token would be exposed in viewers' browsers).
-> - In a setup that uses the browser's "Register Map Asset" UI, **protect the register/delete paths on the reverse proxy (Apache, etc.) side with source-IP restrictions or BASIC authentication**.
-> - For concrete countermeasures (`ADMIN_TOKEN`, restricting `CORS_ORIGINS`, Apache config examples, etc.), see the [Security section of the growi-cad-convert-api README](https://github.com/kawakin26/growi-cad-convert-api#security).
+> - 対策は変換 API 側で行います。**このプラグインの設定（`GROWI_CUSTOM_MAP_CONFIG`）に保護用トークンを書かないでください**（カスタムスクリプトは全ページで実行され、閲覧者のブラウザにトークンが露出します）。
+> - ブラウザの「地図アセットの登録」UI を使う運用では、**リバースプロキシ（Apache 等）側で登録・削除パスをアクセス元 IP 制限または BASIC 認証で保護**します。
+> - 具体的な対策（`ADMIN_TOKEN`、`CORS_ORIGINS` の限定、Apache 設定例など）は、変換 API の [growi-cad-convert-api README のセキュリティ節](https://github.com/kawakin26/growi-cad-convert-api#セキュリティ) を参照してください。
 
-## Using CAD drawings (optional)
+## CAD 図面の利用（任意）
 
-You can specify a CAD drawing (`.dxf` / `.jww`) in `file`. The design delegates conversion to an **external conversion API**. Both DXF and JWW are supported (conversion is handled by the API side, [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api)).
+`file` に CAD 図面（`.dxf` / `.jww`）を指定できます。変換は **外部の変換 API** に委ねる設計です。DXF・JWW とも対応しています（変換は API 側 [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) が担当）。
 
-- When you set the conversion API endpoint in `window.GROWI_CUSTOM_MAP_CONFIG.cadConvertApi`, and `file` is a CAD file, the plugin queries the conversion API and displays the retrieved **converted image (SVG)**.
-- When the conversion API is **unset, not running, or conversion fails**, it **falls back** to the normal attachment resolution → static path.
+- `window.GROWI_CUSTOM_MAP_CONFIG.cadConvertApi` に変換 API のエンドポイントを設定すると、`file` が CAD ファイルのとき、プラグインが変換 API に問い合わせて **変換済み画像（SVG）** を取得して表示します。
+- 変換 API が **未設定・未稼働・変換失敗** の場合は、通常の添付解決 → 静的パスへ **フォールバック** します。
 
-### Registering a map asset (for MAP editors)
+### 地図アセットを登録する（MAP 編集者向け）
 
-When the orientation at which a CAD was uploaded is incorrect, or when you want to **deliver an image via the API** to show it to viewers, a MAP editor can **register an asset under a different name** (no CAD software needed).
+CAD をアップロードした向きが正しくない場合や、画像を **API 経由で配信**して閲覧者に見せたい場合、MAP 編集者が **アセットを別名で登録**できます（CAD ソフト不要）。
 
-1. Open the stock page (default `/media-library`)
-2. Click the **"📋 地図アセットの登録 (Register Map Asset)"** button at the bottom right
-3. In the **"Register Drawing" tab**, select a CAD or an image (filterable by file name; a type badge distinguishes CAD / image; registered ones have a green + "done" badge)
-4. **For CAD**: Select the orientation with the `0/90/180/270°` buttons and check it in the preview / **For an image**: Check the original preview (no rotation specification)
-5. Enter a **registered name** (the name used in the syntax's `file`; a name that doesn't collide with the original is recommended) and click **"Register at this orientation" / "Register this image"**
-6. Afterward, writing `file="<registered name>"` in the syntax displays that asset
+1. ストック用ページ（既定 `/media-library`）を開く
+2. 右下の **「📋 地図アセットの登録」** ボタンをクリック
+3. **「図面を登録」タブ**で CAD または画像を選ぶ（ファイル名で絞り込める。種別バッジで CAD / 画像を区別、登録済みは緑色＋「済」バッジ）
+4. **CAD の場合**: `0/90/180/270°` のボタンで向きを選び、プレビューで確認 ／ **画像の場合**: 原本プレビューを確認（回転指定なし）
+5. **登録名**（記法の `file` に使う名前。元名と重複しない別名を推奨）を入力して **「この向きで登録」/「この画像を登録」**
+6. 以後、記法で `file="<登録名>"` と書くと、そのアセットが表示される
 
-- **CAD**: An **SVG with the specified angle baked in** is saved on the API side and behaves as an independent asset decoupled from the source CAD (it keeps displaying even if you later delete the source CAD). **The orientation cannot be changed.** If you want to change it, or when you fix the CAD, **re-register under a different name** (you can register any number of angle variants from the same source CAD).
-- **Image**: The **original is imported into the API as-is** and delivered via the API thereafter (it keeps displaying even if you later delete the original attachment). Since it is not rotated, correct the orientation in advance with image-editing software.
-- Existing registrations can be checked in the **"Registered List" tab**, and you can add registrations from each asset's "Re-register at another angle" / "Re-register under another name."
-- **Deletion cannot be done from the UI** (a measure to avoid breaking existing pages; planned for a future server management tool).
-- The syntax's `rotate` (CSS rotation at display time) is applied **on top of** the orientation baked in at CAD registration (can be layered at display time for both images and CAD).
+- **CAD**: 指定角で **焼き込んだ SVG** が API 側に保存され、元 CAD から切り離された独立アセットとして振る舞います（元 CAD を後で消しても表示され続けます）。**向きの変更はできません**。変えたい場合や CAD を修正したときは、**別名で再登録**してください（同じ元 CAD から角度違いを何個でも登録可）。
+- **画像**: **原本をそのまま API に取り込み**、以後は API 経由で配信します（元の添付を後で消しても表示され続けます）。回転はしないため、向きは事前に画像編集ソフトで補正してください。
+- 既存の登録は **「登録済み一覧」タブ**で確認でき、各アセットの「別角度で再登録」/「別名で再登録」から追加登録できます。
+- **削除は UI から行えません**（既存ページを壊さないための措置。将来のサーバー管理ツールで対応予定）。
+- 記法の `rotate`（表示時の CSS 回転）は、CAD 登録で焼き込んだ向きの **上にさらに上乗せ**されます（画像・CAD とも表示時に上乗せ可）。
 
 > [!TIP]
-> Because registered assets are **delivered via the API**, even if you restrict the stock page (`/media-library`) to be **viewable only by the editing group**, the registered maps (CAD/images) are still shown to viewers. Since it does not depend on the source file's attachment permissions, a setup of "show media-library only to editors, but show the maps to everyone" is possible.
+> 登録アセットは **API 経由で配信**されるため、ストック用ページ（`/media-library`）を **編集グループのみ閲覧可**に絞っても、登録した地図（CAD・画像）は閲覧者に表示されます。元ファイルの添付権限に依存しないので、「media-library は編集者だけに見せ、地図は全員に見せる」運用が可能です。
 
 > [!NOTE]
-> This button is shown only when the conversion API (`cadConvertApi`) is configured and the current page is the stock page (`defaultSrc`). If you limit the view/edit permissions of the stock page to the MAP editing group, you can limit the registration operation to editors.
+> このボタンは、変換 API（`cadConvertApi`）が設定され、かつ現在ページがストック用ページ（`defaultSrc`）のときだけ表示されます。ページの閲覧・編集権限を、ストック用ページ側で MAP 編集グループに限定しておくと、登録操作を編集者に限定できます。
 
-### How the plugin calls the API (Method 1)
+### プラグインからの呼び出し方（方式1）
 
-The conversion API has three CAD-retrieval methods, but **this plugin always calls it via "Method 1 (the server retrieves the attachment from GROWI)."** The plugin passes only the file name and page path, and the API server retrieves the CAD file from GROWI and converts it.
+変換 API には CAD の取得方式が 3 つありますが、**このプラグインは常に「方式1（サーバーが GROWI から添付を取得する方式）」で呼び出します**。プラグインはファイル名とページパスだけを渡し、API サーバーが GROWI から CAD ファイルを取得して変換します。
 
-The request the plugin sends:
+プラグインが送るリクエスト:
 
 ```
-GET {cadConvertApi}?file=<CAD file name>&src=<page path>
+GET {cadConvertApi}?file=<CADファイル名>&src=<ページパス>
 ```
 
-The expected response (JSON):
+期待するレスポンス（JSON）:
 
 ```json
 { "imageUrl": "https://.../files/<hash>.svg", "status": "ok" }
 ```
 
-- `imageUrl`: The URL of the converted image (`url` is also accepted)
-- `status`: Anything other than `ok` is treated as a fallback
+- `imageUrl`: 変換済み画像の URL（`url` でも可）
+- `status`: `ok` 以外はフォールバック扱い
 
-### The API-side retrieval methods (Method 1 / 2 / 3) and token settings
+### API 側の取得方式（方式1 / 2 / 3）とトークン設定
 
-The conversion API server has three retrieval methods (the plugin uses only **Method 1**; Methods 2 and 3 are options for using the API directly from curl or other systems).
+変換 API サーバー側には 3 つの取得方式があります（プラグインが使うのは **方式1** のみ。方式2・3 は curl や他システムから API を直接使う場合の選択肢です）。
 
-| Method | Call | Use | GROWI auth |
+| 方式 | 呼び出し | 用途 | GROWI 認証 |
 |------|----------|------|-----------|
-| **Method 1** (used by this plugin) | `GET /convert?file=<name>&src=<page path>` | The API server retrieves the attachment with a GROWI token | **A token held by the server is required** |
-| Method 2 | `POST /convert` (CAD bytes in the body) | Send an already-retrieved file directly | Not needed |
-| Method 3 | `GET /convert?url=<absolute URL>` | Retrieve from a public URL | Not needed (disabled by default) |
+| **方式1**（このプラグインが使用）| `GET /convert?file=<名>&src=<ページパス>` | API サーバーが GROWI トークンで添付を取得 | **サーバーが保持するトークンが必要** |
+| 方式2 | `POST /convert`（body に CAD バイト列）| 取得済みファイルを直接送る | 不要 |
+| 方式3 | `GET /convert?url=<絶対URL>` | 公開 URL から取得 | 不要（既定で無効）|
 
-Because this plugin uses Method 1, the **API server side needs the GROWI base URL and access token configured**. The token is set in the API server's environment variables (`GROWI_BASE_URL` / `GROWI_TOKEN`) and is **never written in this plugin's syntax or custom script** (the token is not exposed to the browser).
+このプラグインは方式1 を使うため、**API サーバー側に GROWI のベース URL とアクセストークンの設定が必要** です。トークンは API サーバーの環境変数（`GROWI_BASE_URL` / `GROWI_TOKEN`）に設定するもので、**このプラグインの記法やカスタムスクリプトには一切書きません**（ブラウザにトークンが露出しません）。
 
-- For the API server-side settings such as the required token scope, the auth method (Bearer / query), how to write the `.env`, and reverse-proxy configuration, see the **README of [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api)** for everything.
-- The API side assumes caching (reusing the converted image if the source CAD hasn't been updated) to keep the server load down.
+- 必要なトークンのスコープ、認証方式（Bearer / クエリ）、`.env` の書き方、リバースプロキシ設定などの **API サーバー側の設定は、すべて [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) の README** を参照してください。
+- API 側はキャッシュ前提（元 CAD が更新されていなければ変換済み画像を再利用）で、サーバー負荷を抑えます。
 
-### Image resolution order
+### 画像の解決順
 
-- **Floor plan (`file`)**:
-  1. Resolve the **registered asset** (the CAD's baked SVG / the image original) with the highest priority via the **API delivery URL** (when `file` is a registered name; for both CAD and images; it displays even when the stock is private and does not depend on viewer permissions)
-  2. An unregistered CAD is **converted on the fly** by the conversion API
-  3. If unregistered, the conventional attachment resolution (the `src`-specified page → the default stock page `/media-library`) → static path
-- **Reference photo (`photo`)**: The `photoSrc`-specified page → the page where the syntax is written itself → the same resolution target as the floor plan (attachment resolution)
+- **平面図（`file`）**:
+  1. **登録アセット**（CAD の焼き込み SVG / 画像原本）を **API 配信 URL** で最優先に解決（`file` が登録名のとき。CAD・画像とも。ストック秘匿でも表示でき、閲覧者権限に依存しない）
+  2. 未登録の CAD は変換 API で **その場変換**
+  3. 未登録は従来の添付解決（`src` 指定ページ → 規定ストックページ `/media-library`）→ 静的パス
+- **参照写真（`photo`）**: `photoSrc` 指定ページ → 記法を書いたページ自身 → 平面図と同じ解決先（添付解決）
 
-Attachment resolution matches `originalName` / `fileName` from the page's attachment list to resolve the URL. If not found, it falls back to `/images/maps/{file name}`.
+添付解決は、該当ページの添付一覧から `originalName` / `fileName` を照合して URL を解決します。見つからない場合は `/images/maps/{ファイル名}` にフォールバックします。
 
 > [!IMPORTANT]
-> The view permission of an attachment follows its **source page**. Users without view permission on the stock page cannot see the images. Create the stock page in a scope viewable by everyone you want to share with.
+> 添付ファイルの閲覧権限は **添付元ページ** に従います。ストック用ページの閲覧権限が無いユーザーには画像が表示されません。共有したい相手全員が閲覧できる公開範囲でストック用ページを作成してください。
 
-## Development
+## 開発
 
-### Requirements
+### 必要環境
 
 - Node.js
 - npm
 
-### Setup and build
+### セットアップとビルド
 
 ```bash
 npm install
 npm run build
 ```
 
-- The entry is `client-entry.tsx` at the repository root (placed at the root to match the Vite manifest key to GROWI's expectation). The implementation is split under `src/`
-  - `src/common.ts`: Utilities shared by viewing and editing (attachment resolution, reading settings, label text-color decision, etc.)
-  - `src/viewer.ts`: Viewing feature (syntax → map modal). `activateViewer`
-  - `src/editor.ts`: GUI editing feature (floating buttons on the edit screen; "Create Map" = new insertion, "Edit Map" = read and re-edit/overwrite the existing `:::custom-map` in the page body). `activateEditor`
-  - `src/register.ts`: Map-asset registration feature (floating button on the stock page → register CAD with a specified orientation under a different name, register an image as-is; deletion removed from the UI). `activateRegister`
-  - `client-entry.tsx` **launches each feature in an independent try-catch**, so if one breaks it doesn't affect the others (risk isolation). The editing and registration features depend on the DOM and may break with GROWI updates, but even then the viewing feature keeps working
-- The build uses [Vite](https://vitejs.dev/) (`vite build`, the same configuration as the official script plugin)
-- Build artifacts are output to `dist/`
-  - `dist/assets/client-entry-*.js`: The bundled plugin body
-  - `dist/.vite/manifest.json`: The build manifest (**required for GROWI to resolve the script it injects**)
+- エントリはリポジトリ直下の `client-entry.tsx`（Vite の manifest キーを GROWI の期待に合わせるため直下に配置）。実装は `src/` に分割
+  - `src/common.ts`: 表示・編集で共有するユーティリティ（添付解決、設定読み取り、ラベル文字色判定等）
+  - `src/viewer.ts`: 表示機能（記法 → 地図モーダル）。`activateViewer`
+  - `src/editor.ts`: GUI 編集機能（編集画面のフローティングボタン。「地図を作成」＝新規挿入、「地図を編集」＝ページ本文の既存 `:::custom-map` を読み込み再編集・上書き保存）。`activateEditor`
+  - `src/register.ts`: 地図アセット登録機能（ストックページのフローティングボタン → CAD を向き指定で別名登録、画像を原本のまま登録。削除は UI から廃止）。`activateRegister`
+  - `client-entry.tsx` は各機能を **独立した try-catch で起動** し、1 つが壊れても他に影響しない（リスク分離）。編集・登録機能は DOM に依存するため GROWI のアップデートで壊れる可能性があるが、その場合でも表示機能は動き続ける
+- ビルドには [Vite](https://vitejs.dev/) を使用します（`vite build`、公式スクリプトプラグインと同じ構成）
+- ビルド成果物は `dist/` に出力されます
+  - `dist/assets/client-entry-*.js`: バンドルされたプラグイン本体
+  - `dist/.vite/manifest.json`: ビルドマニフェスト（**GROWI が注入するスクリプトを解決するために必須**）
 
 > [!IMPORTANT]
-> GROWI **does not build** the repository at installation time. Since it uses the files in the ZIP as-is, **build and commit** `dist/` (including `.vite/manifest.json` and `assets/`) before pushing. Without the manifest, even if GROWI detects the plugin, it will not inject the `<script>`, and the syntax will not take effect.
+> GROWI はインストール時にリポジトリを **ビルドしません**。ZIP に含まれるファイルをそのまま使うため、`dist/`（`.vite/manifest.json` と `assets/` を含む）を **ビルドしてコミットしてから** push してください。manifest が無いと、GROWI はプラグインを検出しても `<script>` を注入せず、記法が反映されません。
 
-### Project structure
+### プロジェクト構成
 
 ```
 .
-├── client-entry.tsx       # Entry (launches viewer and editor in independent try-catch)
+├── client-entry.tsx       # エントリ（viewer と editor を独立 try-catch で起動）
 ├── src/
-│   ├── common.ts          # Shared utilities (attachment resolution + asset registration API client)
-│   ├── viewer.ts          # Viewing feature (directive conversion + map modal)
-│   ├── editor.ts          # GUI editing feature (floating buttons + marker placement UI)
-│   └── register.ts        # Map-asset registration (CAD orientation registration / image original registration UI)
-├── dist/                  # Build artifacts (committed)
+│   ├── common.ts          # 共通ユーティリティ（添付解決 + アセット登録 API クライアント）
+│   ├── viewer.ts          # 表示機能（directive 変換 + 地図モーダル）
+│   ├── editor.ts          # GUI 編集機能（フローティングボタン + マーカー配置 UI）
+│   └── register.ts        # 地図アセット登録（CAD 向き登録・画像原本登録 UI）
+├── dist/                  # ビルド成果物（コミット対象）
 │   ├── assets/
 │   │   └── client-entry-*.js
 │   └── .vite/
@@ -372,38 +372,38 @@ npm run build
 ├── package.json
 ├── tsconfig.json
 ├── LICENSE
-├── README.md              # English version (main; this file)
-└── README.ja.md           # Japanese version
+├── README.md              # 日本語版（メイン・正規文書。このファイル）
+└── README.en.md           # 英語版（翻訳）
 ```
 
-### About how the editing feature is launched
+### 編集機能の起動方法について
 
-GROWI's script plugins have no official extension point to extend the editor's toolbar or commands (only `growiFacade.markdownRenderer` is published). Therefore, the editing feature does not depend on the editor's toolbar DOM; instead, it uses an approach of **showing a floating button in a corner of the screen once it detects the edit screen (URL hash `#edit` + CodeMirror display)**. Syntax insertion is done by saving the cursor position (DOM Range) just before opening, restoring it at insertion time, and using `execCommand('insertText')`.
+GROWI のスクリプトプラグインには、エディタのツールバーやコマンドを拡張する公式の拡張点がありません（公開されているのは `growiFacade.markdownRenderer`）。そのため編集機能は、エディタのツールバー DOM に依存せず、**編集画面（URL ハッシュ `#edit` ＋ CodeMirror の表示）を検出したら画面隅にフローティングボタンを出す** 方式です。記法の挿入は、開く直前のカーソル位置（DOM Range）を保存し、挿入時に復元して `execCommand('insertText')` で行います。
 
-## Troubleshooting
+## トラブルシューティング
 
-- **"Map file not found" is displayed**:
-  - **With conversion API**: Check that the name specified in `file` matches a **registered asset name**. Registered maps can be chosen from "🛠️ 地図を作成 (Create Map)" on the edit screen (the registered name is auto-filled). If you write a raw media-library file directly in `file`, it cannot be resolved in a private setup and this message appears (ask a MAP editor to register it).
-  - **Without conversion API**: Check that the **attachment file name** in `file` matches an attachment on the stock page (default `/media-library`), and that the page is in a viewable scope.
-  - The reference photo (`photo`) is resolved from the attachments of the page where the syntax is written, in either setup.
-- **The GUI's map list is empty**:
-  - **With conversion API**: When a MAP editor registers a map (CAD/image) from "📋 地図アセットの登録 (Register Map Asset)," it appears here. Also check that the conversion API (`cadConvertApi`) is correctly configured and running (if unset or stopped, registered assets can't be fetched).
-  - **Without conversion API**: The list is built from the attached images of the stock page (default `/media-library`). Check that images are attached to the stock page and that the page is viewable.
-- **The edit button doesn't appear**: Check that you are in edit mode (URL ending in `#edit`). It is not shown in view mode.
-- **Markers (pins/labels) don't appear right after changing the settings (`GROWI_CUSTOM_MAP_CONFIG`)**: Right after rewriting the custom script or settings, the old script cached in the browser and the new settings can temporarily coexist, and markers may not be drawn. **Force-reload the page (hard reload: `Ctrl+Shift+R` on Windows/Linux, `Cmd+Shift+R` on Mac)** to resolve it. This is not a bug in the plugin itself, but a temporary phenomenon due to caching when applying settings.
-- **Images on another page aren't resolved**: The plugin retrieves the page ID and attachment list via GROWI's API (`/_api/v3/page`, `/_api/v3/attachment/list`). If the API response structure differs by GROWI version, check these responses in the Network tab of the browser's developer tools and adjust how `getPageIdByPath` / `getAttachmentsForPage` in `src/common.ts` extract them.
-- **The syntax isn't reflected / the script isn't loaded**: Check the following in order.
-  1. Whether the plugin is **enabled** in the admin screen
-  2. Whether `dist/.vite/manifest.json` and `dist/assets/client-entry-*.js` are **committed** to the repository (whether you pushed after `npm run build`)
-  3. Whether `<script src="/static/plugins/{org}/{repo}/dist/assets/client-entry-*.js">` is injected into the page's HTML source
-  4. If updated, **reinstall** from the plugin card in the admin screen after pushing to GitHub (GROWI re-fetches the ZIP, so it must be pushed)
-  - The path from which GROWI serves the plugin is `/static/plugins/{org}/{repo}/...` (not `/plugins/...`).
+- **「地図ファイルが見つかりません」と表示される**:
+  - **変換 API あり**: `file` に指定した名前が **登録アセット名** と一致しているか確認してください。登録済みの地図は編集画面の「🛠️ 地図を作成」から選べます（登録名が自動で入ります）。media-library の生ファイルを直接 `file` に書いている場合、秘匿運用では解決できずこのメッセージになります（MAP 編集者に登録を依頼してください）。
+  - **変換 API なし**: `file` の **添付ファイル名** が、ストック用ページ（既定 `/media-library`）の添付と一致しているか、そのページを閲覧できる公開範囲かを確認してください。
+  - 参照写真（`photo`）は、いずれの運用でも記法を書いたページの添付から解決します。
+- **GUI の地図一覧が空**:
+  - **変換 API あり**: MAP 編集者が「📋 地図アセットの登録」から地図（CAD・画像）を登録すると、ここに表示されます。また、変換 API（`cadConvertApi`）が正しく設定・稼働しているか確認してください（未設定・停止中だと登録アセットを取得できません）。
+  - **変換 API なし**: 一覧はストック用ページ（既定 `/media-library`）の添付画像から作られます。ストックページに画像が添付されているか、そのページを閲覧できるかを確認してください。
+- **編集ボタンが出ない**: 編集モードになっているか（URL 末尾に `#edit`）を確認してください。閲覧モードでは表示されません。
+- **設定（`GROWI_CUSTOM_MAP_CONFIG`）変更直後にマーカー（ピン・ラベル）が表示されない**: カスタムスクリプトや設定を書き換えた直後は、ブラウザにキャッシュされた古いスクリプトと新しい設定が一時的に混在し、マーカーが描画されないことがあります。**ページを強制リロード（ハードリロード：Windows/Linux は `Ctrl+Shift+R`、Mac は `Cmd+Shift+R`）** すると解消します。プラグイン本体の不具合ではなく、設定反映時のキャッシュ由来の一時的な現象です。
+- **別ページの画像が解決されない**: プラグインは GROWI の API（`/_api/v3/page`、`/_api/v3/attachment/list`）でページ ID と添付一覧を取得します。GROWI のバージョンによって API のレスポンス構造が異なる場合は、ブラウザの開発者ツールの Network タブでこれらのレスポンスを確認し、`src/common.ts` の `getPageIdByPath` / `getAttachmentsForPage` の取り出し方を調整してください。
+- **記法が反映されない / スクリプトが読み込まれない**: 次を順に確認してください。
+  1. プラグインが管理画面で **有効** になっているか
+  2. リポジトリに `dist/.vite/manifest.json` と `dist/assets/client-entry-*.js` が **コミットされているか**（`npm run build` 後に push したか）
+  3. ページの HTML ソースに `<script src="/static/plugins/{組織名}/{リポジトリ名}/dist/assets/client-entry-*.js">` が注入されているか
+  4. 更新した場合は、GitHub へ push 後に管理画面のプラグインカードで **再インストール**（GROWI は ZIP を取得し直すため push 済みである必要がある）
+  - GROWI がプラグインを配信するパスは `/static/plugins/{組織名}/{リポジトリ名}/...` です（`/plugins/...` ではありません）。
 
-## License
+## ライセンス
 
-Published under the [MIT License](./LICENSE). Copyright (c) 2026 kawakin.
+[MIT License](./LICENSE) の下で公開しています。Copyright (c) 2026 kawakin。
 
-## Related repositories
+## 関連リポジトリ
 
-- [growi-plugin-custom-map](https://github.com/kawakin26/growi-plugin-custom-map) — This repository (the viewing + GUI editing plugin)
-- [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) — The conversion API for CAD (DXF/JWW) conversion and map-asset registration (optional)
+- [growi-plugin-custom-map](https://github.com/kawakin26/growi-plugin-custom-map) — 本リポジトリ（表示＋GUI 編集プラグイン）
+- [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) — CAD（DXF/JWW）変換・地図アセット登録の変換 API（任意）
