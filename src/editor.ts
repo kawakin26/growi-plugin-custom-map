@@ -6,7 +6,6 @@ import {
   getCadConvertApi,
   resolveCurrentPagePath,
   resolveCurrentPagePathResult,
-  setFabLoading,
   fetchRegisteredAssets,
   resolveRegisteredAssetUrl,
   resolveAttachmentUrl,
@@ -2235,30 +2234,19 @@ const ensureFab = (): void => {
     return;
   }
 
-  // 解決中(unknown): ローディング表示の FAB を出す(edit モード時)。判定確定まで
-  // 時間がかかる環境(ID ベース URL・シークレットモードの初回ロード等)で
-  // 「ボタンが出ない」ように見えるのを防ぐ。確定後に本番 FAB / 非表示へ切替。
+  // 解決中(unknown): ここでは何も出さない。
+  // 未確定の段階では「ストック用(登録)」か「非ストック用(作成/編集)」かを
+  // 判別できないため、役割別の FAB を出すと誤ったものを見せてしまう。
+  // 判定確定までのローディング表示は register 側(view/edit 両モードで動く)に
+  // 一本化し、役割中立の 1 つだけを出す。ここで作成/編集 FAB を消しておき、
+  // 確定(other)後に出す。
   if (state === 'unknown') {
-    if (existingEdit) existingEdit.remove();
-    if (existing && existing.dataset.state === 'loading') return; // 既にローディング表示中
-    if (existing) existing.remove();
-    const loading = document.createElement('button');
-    loading.id = BTN_ID;
-    loading.type = 'button';
-    loading.dataset.state = 'loading';
-    Object.assign(loading.style, {
-      position: 'fixed', right: '24px', bottom: '56px', zIndex: '99999',
-      background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '24px',
-      padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
-    });
-    setFabLoading(loading, '地図メニューを準備中…');
-    document.body.appendChild(loading);
+    removeAll();
     return;
   }
 
   // state === 'other': 本番の作成/編集 FAB を出す。
-  // 既に本番 FAB が揃っていればそのまま。ローディング FAB が残っていれば作り直す。
+  // 既に本番 FAB が揃っていればそのまま。
   if (existing && existing.dataset.state === 'ready' && existingEdit) return;
   removeAll();
 

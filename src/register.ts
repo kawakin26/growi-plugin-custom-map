@@ -879,7 +879,10 @@ const ensureFab = (): void => {
     loading.type = 'button';
     loading.dataset.state = 'loading';
     applyFabBaseStyle(loading, fabBottom);
-    setFabLoading(loading, '地図アセットの登録を準備中…');
+    // 役割中立(ストック=登録 / 非ストック=作成のどちらとも確定していない)なので、
+    // 本番 FAB の色は使わず中立グレーにする。確定後に各役割の色の FAB へ変わる。
+    loading.style.background = '#6c757d';
+    setFabLoading(loading, '地図メニューを準備中…');
     document.body.appendChild(loading);
     return;
   }
