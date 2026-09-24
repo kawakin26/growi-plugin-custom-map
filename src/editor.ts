@@ -5,6 +5,8 @@ import {
   listChildPages,
   getCadConvertApi,
   resolveCurrentPagePath,
+  resolveCurrentPagePathResult,
+  setFabLoading,
   fetchRegisteredAssets,
   resolveRegisteredAssetUrl,
   resolveAttachmentUrl,
@@ -2171,35 +2173,45 @@ const openMapPreviewModal = (opts: PreviewModalOptions): void => {
 // ストックページ(figure登録用ページ)では地図作成 FAB を出さない。
 // そこは「図面の向き設定」の作業ページで、地図記法を書く場所ではないため。
 // ストックページ配下を含む判定は common.ts の isStockAreaPath を使う。
-// パス解決は非同期(ID ベース URL 環境では API 解決が必要)なのでキャッシュする。
-let onStockCache: { forUrl: string; value: boolean } | null = null;
+// パス解決は非同期(ID ベース URL 環境では API 解決が必要)。3 状態で扱う:
+//   'unknown': 未確定(初回ロードで未整備・API 解決中/失敗) — 再解決を許す
+//   'stock'  : ストック領域と確定 — 作成/編集 FAB は出さない
+//   'other'  : ストック領域でないと確定 — 作成/編集 FAB を出す
+// 確定できた(resolved=true)ときだけキャッシュし、失敗は 'unknown' のままにして
+// 次の ensureFab で再解決させる(初回未解決が 'other' に焼き付くのを防ぐ)。
+type StockState = 'unknown' | 'stock' | 'other';
+let onStockCache: { forUrl: string; state: StockState } | null = null;
 let stockResolving = false;
 
 const refreshStockJudgement = (onUpdate: () => void): void => {
   if (typeof location === 'undefined') return;
   const url = location.pathname;
-  if (onStockCache && onStockCache.forUrl === url) return;
+  if (onStockCache && onStockCache.forUrl === url && onStockCache.state !== 'unknown') return;
   if (stockResolving) return;
   stockResolving = true;
-  resolveCurrentPagePath()
-    .then((path) => {
-      const value = !!path && isStockAreaPath(path);
-      onStockCache = { forUrl: url, value };
+  resolveCurrentPagePathResult()
+    .then(({ path, resolved }) => {
+      if (!resolved) {
+        onStockCache = { forUrl: url, state: 'unknown' };
+        return;
+      }
+      const state: StockState = path && isStockAreaPath(path) ? 'stock' : 'other';
+      onStockCache = { forUrl: url, state };
       onUpdate();
     })
-    .catch(() => { onStockCache = { forUrl: url, value: false }; })
+    .catch(() => { onStockCache = { forUrl: url, state: 'unknown' }; })
     .finally(() => { stockResolving = false; });
 };
 
-const isOnStockPageCached = (): boolean => {
-  if (typeof location === 'undefined') return false;
-  if (onStockCache && onStockCache.forUrl === location.pathname) return onStockCache.value;
-  return false;
+const getStockState = (): StockState => {
+  if (typeof location === 'undefined') return 'unknown';
+  if (onStockCache && onStockCache.forUrl === location.pathname) return onStockCache.state;
+  return 'unknown';
 };
 
 const ensureFab = (): void => {
   const editing = isEditing();
-  const existing = document.getElementById(BTN_ID);
+  const existing = document.getElementById(BTN_ID) as HTMLButtonElement | null;
   const existingEdit = document.getElementById(EDIT_BTN_ID);
 
   const removeAll = (): void => {
@@ -2212,20 +2224,49 @@ const ensureFab = (): void => {
     return;
   }
 
-  // ストックページなら地図作成ボタンを出さない(向き設定ボタンと役割分離)。
+  // ストック判定は非同期(ID ベース URL 環境では API 解決が必要)。
+  // 未解決なら解決を促し、確定後に再評価する。
   refreshStockJudgement(() => ensureFab());
-  if (isOnStockPageCached()) {
+  const state = getStockState();
+
+  // ストックページなら地図作成/編集ボタンを出さない(向き設定ボタンと役割分離)。
+  if (state === 'stock') {
     removeAll();
     return;
   }
 
-  if (existing && existingEdit) return;
+  // 解決中(unknown): ローディング表示の FAB を出す(edit モード時)。判定確定まで
+  // 時間がかかる環境(ID ベース URL・シークレットモードの初回ロード等)で
+  // 「ボタンが出ない」ように見えるのを防ぐ。確定後に本番 FAB / 非表示へ切替。
+  if (state === 'unknown') {
+    if (existingEdit) existingEdit.remove();
+    if (existing && existing.dataset.state === 'loading') return; // 既にローディング表示中
+    if (existing) existing.remove();
+    const loading = document.createElement('button');
+    loading.id = BTN_ID;
+    loading.type = 'button';
+    loading.dataset.state = 'loading';
+    Object.assign(loading.style, {
+      position: 'fixed', right: '24px', bottom: '56px', zIndex: '99999',
+      background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '24px',
+      padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
+    });
+    setFabLoading(loading, '地図メニューを準備中…');
+    document.body.appendChild(loading);
+    return;
+  }
+
+  // state === 'other': 本番の作成/編集 FAB を出す。
+  // 既に本番 FAB が揃っていればそのまま。ローディング FAB が残っていれば作り直す。
+  if (existing && existing.dataset.state === 'ready' && existingEdit) return;
   removeAll();
 
   // 「地図を作成」FAB(新規)。
   const fab = document.createElement('button');
   fab.id = BTN_ID;
   fab.type = 'button';
+  fab.dataset.state = 'ready';
   fab.textContent = '🛠️ 地図を作成';
   Object.assign(fab.style, {
     position: 'fixed', right: '24px', bottom: '56px', zIndex: '99999',

@@ -5,6 +5,8 @@ import {
   listChildPages,
   getCadConvertApi,
   resolveCurrentPagePath,
+  resolveCurrentPagePathResult,
+  setFabLoading,
   fetchSourceFiles,
   fetchRegisteredAssets,
   registerAsset,
@@ -35,36 +37,51 @@ const MODAL_ID = 'growi-custom-map-register-modal';
 
 const ROTATE_OPTIONS = [0, 90, 180, 270];
 
-// 現在ページがストック領域かどうかの判定結果(非同期解決した値のキャッシュ)。
-// resolveCurrentPagePath は API 解決を含むため、解決できるまでは null。
-let onStockCache: { forUrl: string; value: boolean } | null = null;
+// 現在ページがストック領域かどうかの判定状態(3 値)。
+//   'unknown': まだ確定していない(初回ロードでページ情報未整備・API 解決中/失敗)
+//   'stock'  : ストック領域と確定
+//   'other'  : ストック領域でないと確定
+// パス解決は API を含み初回ロードでは間に合わないことがあるため、確定できた
+// (resolved=true)ときだけキャッシュする。失敗は 'unknown' のままにして、
+// 次の ensureFab(interval / MutationObserver)で再解決できるようにする
+// (これをしないと、初回の未解決が 'other' として焼き付き、リロードするまで
+// FAB が正しく出ない)。
+type StockState = 'unknown' | 'stock' | 'other';
+let onStockCache: { forUrl: string; state: StockState } | null = null;
 let resolving = false;
 
-// 非同期でストックページ判定を更新し、変化があれば onUpdate を呼ぶ。
+// 非同期でストックページ判定を更新し、確定したら onUpdate を呼ぶ。
 const refreshStockJudgement = (onUpdate: () => void): void => {
   if (typeof location === 'undefined') return;
   const url = location.pathname;
-  if (onStockCache && onStockCache.forUrl === url) return; // 解決済み
+  // 既に確定済み(stock/other)ならそのまま。unknown のときは再解決を試みる。
+  if (onStockCache && onStockCache.forUrl === url && onStockCache.state !== 'unknown') return;
   if (resolving) return;
   resolving = true;
-  resolveCurrentPagePath()
-    .then((path) => {
-      const value = !!path && isStockAreaPath(path);
-      onStockCache = { forUrl: url, value };
+  resolveCurrentPagePathResult()
+    .then(({ path, resolved }) => {
+      if (!resolved) {
+        // まだ確定できない。unknown のまま(キャッシュせず次回再試行)。
+        onStockCache = { forUrl: url, state: 'unknown' };
+        return;
+      }
+      const state: StockState = path && isStockAreaPath(path) ? 'stock' : 'other';
+      onStockCache = { forUrl: url, state };
       onUpdate();
     })
     .catch((e) => {
       console.warn('[custom-map-register] failed to resolve current page path', e);
-      onStockCache = { forUrl: url, value: false };
+      // 失敗は確定扱いにしない(unknown のまま再試行させる)。
+      onStockCache = { forUrl: url, state: 'unknown' };
     })
     .finally(() => { resolving = false; });
 };
 
-// 直近の判定結果(未解決なら false)。
-const isOnStockPageCached = (): boolean => {
-  if (typeof location === 'undefined') return false;
-  if (onStockCache && onStockCache.forUrl === location.pathname) return onStockCache.value;
-  return false;
+// 直近の判定状態を返す(未解決なら 'unknown')。
+const getStockState = (): StockState => {
+  if (typeof location === 'undefined') return 'unknown';
+  if (onStockCache && onStockCache.forUrl === location.pathname) return onStockCache.state;
+  return 'unknown';
 };
 
 // ------------------------------------------------------------
@@ -812,10 +829,20 @@ const buildAssetCard = (asset: RegisteredAsset, src: string, container: HTMLElem
 // ------------------------------------------------------------
 // フローティングボタン
 // ------------------------------------------------------------
+// FAB の共通スタイルを適用する(ローディング/本番で共有)。
+const applyFabBaseStyle = (fab: HTMLButtonElement, bottom: string): void => {
+  Object.assign(fab.style, {
+    position: 'fixed', right: '24px', bottom, zIndex: '99999',
+    background: '#20a37a', color: '#fff', border: 'none', borderRadius: '24px',
+    padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
+  });
+};
+
 const ensureFab = (): void => {
   // CAD 変換 API が無ければ登録できないのでボタンを出さない。
   const apiConfigured = !!getCadConvertApi();
-  const existing = document.getElementById(BTN_ID);
+  const existing = document.getElementById(BTN_ID) as HTMLButtonElement | null;
 
   if (!apiConfigured) {
     if (existing) existing.remove();
@@ -825,33 +852,54 @@ const ensureFab = (): void => {
   // 現在ページのパス解決は非同期(ID ベース URL 環境では API 解決が必要)。
   // 未解決なら解決を促し、解決後の再評価で FAB を出す。
   refreshStockJudgement(() => ensureFab());
-  const onStock = isOnStockPageCached();
+  const state = getStockState();
 
-  if (!onStock) {
+  // ストック領域でないと確定したら FAB は出さない。
+  if (state === 'other') {
     if (existing) existing.remove();
     return;
   }
+
   // view モードでは GROWI 標準の「公開/更新」ボタンバーが無く FAB が浮くため、
   // その高さ分(約 40px)だけ下げる。edit モードは 56px のまま。
   const editing = window.location.hash.includes('edit');
   const fabBottom = editing ? '56px' : '16px';
 
-  // 既にボタンがある場合は、モード切替(view↔edit)に追従して位置だけ更新する。
-  if (existing) {
-    (existing as HTMLElement).style.bottom = fabBottom;
+  // 解決中(unknown): ローディング表示の FAB を出す。判定確定までに時間がかかる
+  // 環境(ID ベース URL・シークレットモードの初回ロード等)で「反応が無い」ように
+  // 見えるのを防ぐ。確定後に本番 FAB / 非表示へ切り替わる。
+  if (state === 'unknown') {
+    if (existing && existing.dataset.state === 'loading') {
+      existing.style.bottom = fabBottom; // 位置だけ追従
+      return;
+    }
+    if (existing) existing.remove();
+    const loading = document.createElement('button');
+    loading.id = BTN_ID;
+    loading.type = 'button';
+    loading.dataset.state = 'loading';
+    applyFabBaseStyle(loading, fabBottom);
+    setFabLoading(loading, '地図アセットの登録を準備中…');
+    document.body.appendChild(loading);
     return;
+  }
+
+  // state === 'stock': 本番 FAB を出す。
+  // 既にローディング FAB がある場合は作り直す(中身が違うため)。
+  if (existing) {
+    if (existing.dataset.state === 'ready') {
+      existing.style.bottom = fabBottom; // 位置だけ追従
+      return;
+    }
+    existing.remove();
   }
 
   const fab = document.createElement('button');
   fab.id = BTN_ID;
   fab.type = 'button';
+  fab.dataset.state = 'ready';
   fab.textContent = '📋 地図アセットの登録';
-  Object.assign(fab.style, {
-    position: 'fixed', right: '24px', bottom: fabBottom, zIndex: '99999',
-    background: '#20a37a', color: '#fff', border: 'none', borderRadius: '24px',
-    padding: '12px 18px', fontSize: '14px', fontWeight: 'bold',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.3)', cursor: 'pointer',
-  });
+  applyFabBaseStyle(fab, fabBottom);
   fab.addEventListener('click', (e) => {
     e.preventDefault();
     try {

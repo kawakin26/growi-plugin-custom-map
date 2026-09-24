@@ -306,49 +306,77 @@ export const getPagePathById = async (pageId: string): Promise<string | null> =>
   }
 };
 
-// 現在ページのパス解決結果をキャッシュする(URL 単位)。
+// 現在ページのパス解決結果(確定できたものだけ)をキャッシュする(URL 単位)。
+// 未確定(初回ロードでページ情報が未整備・API 解決失敗)のものはキャッシュせず、
+// 次回呼び出しで再試行できるようにする。
 const currentPathCache = new Map<string, Promise<string>>();
 
-// 現在表示中ページのパスを解決する。環境差を吸収する:
-//   1. window.GROWI_CONTEXT.page.path があればそれ(従来環境)
-//   2. __NEXT_DATA__ の currentPathname が「/」始まりのパスならそれ
-//   3. URL パス(location.pathname)がページ ID なら API でパス解決
-//   4. それ以外は location.pathname をそのまま返す
-// 非同期(API 解決があるため)。同一 URL の間はキャッシュする。
-export const resolveCurrentPagePath = async (): Promise<string> => {
+// パス解決の結果。resolved=true のときだけ path を信頼できる(実ページパス)。
+// resolved=false は「まだ確定できない/失敗」で、暫定的に path(生 URL)を返す。
+export interface CurrentPagePathResult {
+  path: string;
+  resolved: boolean;
+}
+
+// 現在表示中ページのパスを、確度付きで解決する。環境差を吸収する:
+//   1. window.GROWI_CONTEXT.page.path があればそれ(従来環境) → resolved
+//   2. __NEXT_DATA__ の currentPathname が「/」始まりの実パスならそれ → resolved
+//   3. URL パス(location.pathname)がページ ID なら API でパス解決 → 成功時 resolved
+//   4. それ以外(生 URL しか分からない)は resolved=false で暫定 path を返す
+// 「確定できた(resolved=true)」ケースだけをキャッシュするため、初回ロードで
+// ページ情報が未整備でも、次の呼び出しで再解決できる(リロード不要)。
+export const resolveCurrentPagePathResult = async (): Promise<CurrentPagePathResult> => {
   const fromContext = (window as unknown as { GROWI_CONTEXT?: { page?: { path?: string } } })
     .GROWI_CONTEXT?.page?.path;
   if (typeof fromContext === 'string' && fromContext.startsWith('/')) {
-    return fromContext;
+    return { path: fromContext, resolved: true };
   }
 
   const rawPath = typeof location !== 'undefined' ? location.pathname : '';
   const cached = currentPathCache.get(rawPath);
-  if (cached) return cached;
+  if (cached) return { path: await cached, resolved: true };
 
-  const promise = (async (): Promise<string> => {
-    // __NEXT_DATA__ の currentPathname が実パス(ID でない)ならそれを使う。
-    try {
-      const cur = (window as unknown as {
-        __NEXT_DATA__?: { props?: { pageProps?: { currentPathname?: string } } };
-      }).__NEXT_DATA__?.props?.pageProps?.currentPathname;
-      if (typeof cur === 'string' && cur.startsWith('/')) {
-        const seg = cur.replace(/^\//, '').split('/')[0] || '';
-        if (!looksLikePageId(seg)) return cur;
+  // __NEXT_DATA__ の currentPathname が実パス(ID でない)ならそれを使う。
+  try {
+    const cur = (window as unknown as {
+      __NEXT_DATA__?: { props?: { pageProps?: { currentPathname?: string } } };
+    }).__NEXT_DATA__?.props?.pageProps?.currentPathname;
+    if (typeof cur === 'string' && cur.startsWith('/')) {
+      const seg = cur.replace(/^\//, '').split('/')[0] || '';
+      if (!looksLikePageId(seg)) {
+        currentPathCache.set(rawPath, Promise.resolve(cur));
+        return { path: cur, resolved: true };
       }
-    } catch { /* noop */ }
-
-    // URL パスの先頭セグメントがページ ID なら API でパス解決する。
-    const seg = rawPath.replace(/^\//, '').split('/')[0] || '';
-    if (looksLikePageId(seg)) {
-      const resolved = await getPagePathById(seg);
-      if (resolved) return resolved;
     }
-    return rawPath;
-  })();
+  } catch { /* noop */ }
 
-  currentPathCache.set(rawPath, promise);
-  return promise;
+  // URL パスの先頭セグメントがページ ID なら API でパス解決する。
+  const seg = rawPath.replace(/^\//, '').split('/')[0] || '';
+  if (looksLikePageId(seg)) {
+    const resolvedPath = await getPagePathById(seg);
+    if (resolvedPath) {
+      currentPathCache.set(rawPath, Promise.resolve(resolvedPath));
+      return { path: resolvedPath, resolved: true };
+    }
+    // API 解決に失敗(セッション未確立・一時的な失敗等)。確定できないので
+    // キャッシュせず、次回再試行できるようにする。
+    return { path: rawPath, resolved: false };
+  }
+
+  // 生 URL が実パス形式(/ 始まりで ID でない)なら確定とみなす。
+  if (rawPath.startsWith('/')) {
+    currentPathCache.set(rawPath, Promise.resolve(rawPath));
+    return { path: rawPath, resolved: true };
+  }
+
+  return { path: rawPath, resolved: false };
+};
+
+// 現在表示中ページのパスを解決する(パスのみ・後方互換 API)。
+// 確度が不要な呼び出し向け。内部で resolveCurrentPagePathResult を使う。
+export const resolveCurrentPagePath = async (): Promise<string> => {
+  const { path } = await resolveCurrentPagePathResult();
+  return path;
 };
 
 // ページ本文(保存済みの最新リビジョン)と、更新用の revisionId・パスをまとめて取得する。
@@ -667,4 +695,48 @@ const parseColorToRgb = (color: string): { r: number; g: number; b: number } | n
   }
 
   return null;
+};
+
+// ============================================================
+// FAB ローディング表示の共通ユーティリティ
+// ============================================================
+
+// 回転アニメ(spinner)用の <style> を 1 度だけ document に注入する。
+// FAB のローディング表示(パス解決中)で使う。
+const SPINNER_STYLE_ID = 'growi-custom-map-spinner-style';
+
+export const ensureSpinnerStyle = (): void => {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(SPINNER_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = SPINNER_STYLE_ID;
+  style.textContent = `
+@keyframes gcm-spin { to { transform: rotate(360deg); } }
+.gcm-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: gcm-spin 0.8s linear infinite;
+}
+`;
+  document.head.appendChild(style);
+};
+
+// ローディング表示中の FAB の中身(スピナー＋文言)を設定する。
+// disabled 表示(半透明・カーソル既定)にして、解決中はクリックできないようにする。
+export const setFabLoading = (fab: HTMLButtonElement, label: string): void => {
+  ensureSpinnerStyle();
+  fab.disabled = true;
+  fab.style.opacity = '0.7';
+  fab.style.cursor = 'default';
+  fab.textContent = '';
+  const spinner = document.createElement('span');
+  spinner.className = 'gcm-spinner';
+  fab.appendChild(spinner);
+  fab.appendChild(document.createTextNode(label));
 };
