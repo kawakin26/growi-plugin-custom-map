@@ -287,7 +287,7 @@ CAD をアップロードした向きが正しくない場合や、画像を **A
 - API サーバー側の設定（`GROWI_BASE_URL` / `GROWI_TOKEN`、認証方式、リバースプロキシ、キャッシュ等）は、すべて [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) の README を参照してください。トークンは **API サーバーの環境変数** に置き、**このプラグインの記法やカスタムスクリプトには一切書きません**（ブラウザにトークンが露出しません）。
 
 > [!NOTE]
-> 変換 API には `/convert`（CAD をその場変換するエンドポイント）もありますが、現行の GUI 運用では通常使いません（登録アセット方式が正規経路）。詳細は [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) の README を参照してください。
+> 変換 API には `/convert`（CAD を都度変換するエンドポイント）もありますが、現行の GUI 運用では通常使いません（登録アセット方式が正規経路）。詳細は [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) の README を参照してください。
 
 ### 画像の解決順
 
