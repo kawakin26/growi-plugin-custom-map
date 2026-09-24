@@ -100,26 +100,17 @@ You can specify CAD drawings (`.dxf` / `.jww`) in `file`. Conversion is delegate
 - When `cadConvertApi` is set, if `file` is a CAD file, the plugin queries the conversion API, obtains the converted image (SVG), and displays it.
 - If the conversion API is not set, not running, or conversion fails, it falls back to normal attachment resolution → static path.
 
-### How to Call from Plugin (Method 1)
+### Integration with the conversion API (registered-asset method)
 
-The conversion API has 3 ways to obtain CAD, but **this plugin always calls using "Method 1 (where the server obtains attachments from GROWI)"**. The plugin provides only the filename and page path; the API server obtains the CAD file from GROWI and converts it.
+The normal workflow of this plugin is the **"registered-asset method."** A CAD file (or image) is **registered with the API once** on the stock page (`POST /assets`), and the map syntax references it by its **registered name** (not the original raw file name). At display time, the plugin resolves the registered asset (`GET /assets`) and the API delivers the converted SVG (or the original image).
 
-Request sent by plugin:
+- **Do not specify a raw CAD file name directly in the syntax.** Referencing by registered name is the premise. If you write a raw file name directly, ordinary viewers usually lack view permission for the stock page (`/media-library`) and cannot display it (i.e., it does not coexist with a private-stock setup).
+- Registered assets are **delivered by the API independently of GROWI permissions**, so even if you restrict the stock page to be viewable only by the editing group, the maps are shown to everyone.
+- For the API server-side settings (`GROWI_BASE_URL` / `GROWI_TOKEN`, auth method, reverse proxy, caching, etc.), see the README of [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api). Keep the token in the **API server's environment variables**, and **never write it in this plugin's syntax or custom script** (the token is not exposed to the browser).
 
+```{note}
+The conversion API also has `/convert` (an endpoint that converts CAD on the fly), but it is normally not used in the current GUI workflow (the registered-asset method is the canonical path). See the [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) README for details.
 ```
-GET {cadConvertApi}?file=<CAD filename>&src=<page path>
-```
-
-Expected response (JSON):
-
-```json
-{ "imageUrl": "https://.../files/<hash>.svg", "status": "ok" }
-```
-
-- `imageUrl`: URL of the converted image (or `url`)
-- `status`: anything other than `ok` is treated as fallback
-
-Because Method 1 is used, **the API server side must be configured with GROWI's base URL and access token**. The token is set in the API server's environment variables (`GROWI_BASE_URL` / `GROWI_TOKEN`) and is **never written in this plugin's syntax or custom scripts** (browser tokens not exposed). For API server-side configuration, see [growi-cad-convert-api README](https://github.com/kawakin26/growi-cad-convert-api).
 
 ## Map Asset Registration (For MAP Editors)
 
@@ -153,7 +144,7 @@ Hiding media-library is fundamentally for "behind-the-scenes organization" and i
 ## Security (When Publishing the Conversion API)
 
 ```{caution}
-The conversion API pointed to by `cadConvertApi` has **write and processing endpoints** like registration (`POST /assets`), deletion (`DELETE /assets`), and conversion (`POST /convert`). Publishing these carelessly to the internet risks third parties arbitrarily registering/deleting assets—breaking maps on published pages.
+The conversion API pointed to by `cadConvertApi` has **write endpoints** like registration (`POST /assets`) and deletion (`DELETE /assets`) (there is also a convert endpoint `POST /convert`, but it is normally not used in the current workflow). Publishing these carelessly to the internet risks third parties arbitrarily registering/deleting assets—breaking maps on published pages.
 
 - Protect on the API side. **Do not write a protective token in this plugin's settings (`GROWI_CUSTOM_MAP_CONFIG`)** (custom scripts run on all pages and tokens expose to viewer browsers).
 - When using the "Register Map Assets" UI from browser, **protect registration and deletion paths with IP restriction or BASIC authentication on the reverse proxy (Apache, etc.)**.

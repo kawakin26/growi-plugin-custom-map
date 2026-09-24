@@ -245,7 +245,7 @@ window.GROWI_CUSTOM_MAP_CONFIG = {
 > [!CAUTION]
 > **Security when publishing the conversion API (for operators)**
 >
-> The conversion API that `cadConvertApi` points to has **write/processing endpoints** such as register (`POST /assets`), delete (`DELETE /assets`), and convert (`POST /convert`). If you expose these to the internet unprotected, a third party may register/delete assets at will (i.e., break the maps on published pages).
+> The conversion API that `cadConvertApi` points to has **write endpoints** such as register (`POST /assets`) and delete (`DELETE /assets`) (there is also a convert endpoint `POST /convert`, but it is normally not used in the current workflow). If you expose these to the internet unprotected, a third party may register/delete assets at will (i.e., break the maps on published pages).
 >
 > - The countermeasures are done on the conversion API side. **Do not write a protection token in this plugin's settings (`GROWI_CUSTOM_MAP_CONFIG`)** (the custom script runs on all pages, so the token would be exposed in viewers' browsers).
 > - In a setup that uses the browser's "Register Map Asset" UI, **protect the register/delete paths on the reverse proxy (Apache, etc.) side with source-IP restrictions or BASIC authentication**.
@@ -281,46 +281,22 @@ When the orientation at which a CAD was uploaded is incorrect, or when you want 
 > [!NOTE]
 > This button is shown only when the conversion API (`cadConvertApi`) is configured and the current page is the stock page (`defaultSrc`). If you limit the view/edit permissions of the stock page to the MAP editing group, you can limit the registration operation to editors.
 
-### How the plugin calls the API (Method 1)
+### Integration with the conversion API (registered-asset method)
 
-The conversion API has three CAD-retrieval methods, but **this plugin always calls it via "Method 1 (the server retrieves the attachment from GROWI)."** The plugin passes only the file name and page path, and the API server retrieves the CAD file from GROWI and converts it.
+The normal workflow of this plugin is the **"registered-asset method."** A CAD file (or image) is **registered with the API once** on the stock page (`POST /assets`), and the map syntax references it by its **registered name** (not the original raw file name). At display time, the plugin resolves the registered asset (`GET /assets`) and the API delivers the converted SVG (or the original image).
 
-The request the plugin sends:
+- **Do not specify a raw CAD file name directly in the syntax.** Referencing by registered name is the premise. If you write a raw file name directly, ordinary viewers usually lack view permission for the stock page (`/media-library`) and cannot display it (i.e., it does not coexist with a private-stock setup).
+- Registered assets are **delivered by the API independently of GROWI permissions**, so even if you restrict the stock page to be viewable only by the editing group, the maps are shown to everyone.
+- For the API server-side settings (`GROWI_BASE_URL` / `GROWI_TOKEN`, auth method, reverse proxy, caching, etc.), see the README of [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api). Keep the token in the **API server's environment variables**, and **never write it in this plugin's syntax or custom script** (the token is not exposed to the browser).
 
-```
-GET {cadConvertApi}?file=<CAD file name>&src=<page path>
-```
-
-The expected response (JSON):
-
-```json
-{ "imageUrl": "https://.../files/<hash>.svg", "status": "ok" }
-```
-
-- `imageUrl`: The URL of the converted image (`url` is also accepted)
-- `status`: Anything other than `ok` is treated as a fallback
-
-### The API-side retrieval methods (Method 1 / 2 / 3) and token settings
-
-The conversion API server has three retrieval methods (the plugin uses only **Method 1**; Methods 2 and 3 are options for using the API directly from curl or other systems).
-
-| Method | Call | Use | GROWI auth |
-|------|----------|------|-----------|
-| **Method 1** (used by this plugin) | `GET /convert?file=<name>&src=<page path>` | The API server retrieves the attachment with a GROWI token | **A token held by the server is required** |
-| Method 2 | `POST /convert` (CAD bytes in the body) | Send an already-retrieved file directly | Not needed |
-| Method 3 | `GET /convert?url=<absolute URL>` | Retrieve from a public URL | Not needed (disabled by default) |
-
-Because this plugin uses Method 1, the **API server side needs the GROWI base URL and access token configured**. The token is set in the API server's environment variables (`GROWI_BASE_URL` / `GROWI_TOKEN`) and is **never written in this plugin's syntax or custom script** (the token is not exposed to the browser).
-
-- For the API server-side settings such as the required token scope, the auth method (Bearer / query), how to write the `.env`, and reverse-proxy configuration, see the **README of [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api)** for everything.
-- The API side assumes caching (reusing the converted image if the source CAD hasn't been updated) to keep the server load down.
+> [!NOTE]
+> The conversion API also has `/convert` (an endpoint that converts CAD on the fly), but it is normally not used in the current GUI workflow (the registered-asset method is the canonical path). See the [growi-cad-convert-api](https://github.com/kawakin26/growi-cad-convert-api) README for details.
 
 ### Image resolution order
 
 - **Floor plan (`file`)**:
-  1. Resolve the **registered asset** (the CAD's baked SVG / the image original) with the highest priority via the **API delivery URL** (when `file` is a registered name; for both CAD and images; it displays even when the stock is private and does not depend on viewer permissions)
-  2. An unregistered CAD is **converted on the fly** by the conversion API
-  3. If unregistered, the conventional attachment resolution (the `src`-specified page → the default stock page `/media-library`) → static path
+  1. Resolve the **registered asset** (the CAD's baked SVG / the image original) via the **API delivery URL** (when `file` is a registered name; for both CAD and images; it displays even when the stock is private and does not depend on viewer permissions) = the **canonical path**
+  2. If not found, resolve the attachment directly from the page where the syntax is written / the stock page (the path used in a no-conversion-API setup)
 - **Reference photo (`photo`)**: The `photoSrc`-specified page → the page where the syntax is written itself → the same resolution target as the floor plan (attachment resolution)
 
 Attachment resolution matches `originalName` / `fileName` from the page's attachment list to resolve the URL. If not found, it falls back to `/images/maps/{file name}`.
