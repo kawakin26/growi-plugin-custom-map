@@ -322,8 +322,9 @@ CAD をアップロードした向きが正しくない場合や、画像を **A
 
 ### GitHub Release
 
-- **[v0.1.0 Release](https://github.com/kawakin26/growi-plugin-custom-map/releases/tag/v0.1.0)** — 最初のリリース
+- **[v0.2.0 Release](https://github.com/kawakin26/growi-plugin-custom-map/releases/tag/v0.2.0)** — 最新リリース（ドキュメント整理: CAD 取得3方式の記述を削除し登録アセット方式に統一）
   - ドキュメントの **PDF（日本語 / 英語）** をリリースの Assets からダウンロードできます（ビルド環境不要）。
+- **[v0.1.0 Release](https://github.com/kawakin26/growi-plugin-custom-map/releases/tag/v0.1.0)** — 最初のリリース
 
 ### GitHub Actions
 

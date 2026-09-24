@@ -8,7 +8,7 @@
 project = "growi-plugin-custom-map"
 author = "kawakin"
 copyright = "2026, kawakin"
-release = "0.1.0"
+release = "0.2.0"
 
 # Language (English).
 language = "en"

@@ -8,7 +8,7 @@
 project = "growi-plugin-custom-map"
 author = "kawakin"
 copyright = "2026, kawakin"
-release = "0.1.0"
+release = "0.2.0"
 
 # 言語（日本語）。PDF の禁則処理・フォント選択にも影響する。
 language = "ja"
