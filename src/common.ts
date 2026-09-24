@@ -318,11 +318,17 @@ export interface CurrentPagePathResult {
   resolved: boolean;
 }
 
-// 現在表示中ページのパスを、確度付きで解決する。環境差を吸収する:
+// 現在表示中ページのパスを、確度付きで解決する。環境差を吸収する。
+// 優先順位(重要):
 //   1. window.GROWI_CONTEXT.page.path があればそれ(従来環境) → resolved
-//   2. __NEXT_DATA__ の currentPathname が「/」始まりの実パスならそれ → resolved
-//   3. URL パス(location.pathname)がページ ID なら API でパス解決 → 成功時 resolved
-//   4. それ以外(生 URL しか分からない)は resolved=false で暫定 path を返す
+//   2. location.pathname の先頭がページ ID なら、必ず API でパス解決する → 成功で resolved
+//      ※ このとき __NEXT_DATA__.currentPathname は信用しない。初回ロードでは
+//        currentPathname が /login など「実ページと無関係の初期値」を指すことが
+//        あり(実測)、それを実パスと誤認して /login を確定・キャッシュしてしまうと
+//        リロードするまで直らないため。
+//   3. location.pathname 自体が「/」始まりの実パス(ID でない)ならそれを使う。
+//   4. 最後の手段として __NEXT_DATA__.currentPathname(実パス形式)を暫定採用。
+//      ただし確定はできない(resolved=false)ためキャッシュしない。
 // 「確定できた(resolved=true)」ケースだけをキャッシュするため、初回ロードで
 // ページ情報が未整備でも、次の呼び出しで再解決できる(リロード不要)。
 export const resolveCurrentPagePathResult = async (): Promise<CurrentPagePathResult> => {
@@ -336,21 +342,9 @@ export const resolveCurrentPagePathResult = async (): Promise<CurrentPagePathRes
   const cached = currentPathCache.get(rawPath);
   if (cached) return { path: await cached, resolved: true };
 
-  // __NEXT_DATA__ の currentPathname が実パス(ID でない)ならそれを使う。
-  try {
-    const cur = (window as unknown as {
-      __NEXT_DATA__?: { props?: { pageProps?: { currentPathname?: string } } };
-    }).__NEXT_DATA__?.props?.pageProps?.currentPathname;
-    if (typeof cur === 'string' && cur.startsWith('/')) {
-      const seg = cur.replace(/^\//, '').split('/')[0] || '';
-      if (!looksLikePageId(seg)) {
-        currentPathCache.set(rawPath, Promise.resolve(cur));
-        return { path: cur, resolved: true };
-      }
-    }
-  } catch { /* noop */ }
-
-  // URL パスの先頭セグメントがページ ID なら API でパス解決する。
+  // URL パスの先頭セグメントがページ ID なら、API でパス解決する(最優先)。
+  // ID ベース URL 環境の本筋。__NEXT_DATA__ は初回に古い値(/login 等)を持つ
+  // ことがあるため、ここでは参照しない。
   const seg = rawPath.replace(/^\//, '').split('/')[0] || '';
   if (looksLikePageId(seg)) {
     const resolvedPath = await getPagePathById(seg);
@@ -359,15 +353,30 @@ export const resolveCurrentPagePathResult = async (): Promise<CurrentPagePathRes
       return { path: resolvedPath, resolved: true };
     }
     // API 解決に失敗(セッション未確立・一時的な失敗等)。確定できないので
-    // キャッシュせず、次回再試行できるようにする。
+    // キャッシュせず、次回再試行できるようにする(unknown 相当)。
     return { path: rawPath, resolved: false };
   }
 
-  // 生 URL が実パス形式(/ 始まりで ID でない)なら確定とみなす。
+  // 生 URL が実パス形式(/ 始まりで ID でない)なら、それを実パスとして確定する。
+  // location.pathname は現在ページを正しく指すため、__NEXT_DATA__ より信頼できる。
   if (rawPath.startsWith('/')) {
     currentPathCache.set(rawPath, Promise.resolve(rawPath));
     return { path: rawPath, resolved: true };
   }
+
+  // 最後の手段: __NEXT_DATA__ の currentPathname(実パス形式)を暫定採用。
+  // location から判断できない特殊ケース向け。確定はできないのでキャッシュしない。
+  try {
+    const cur = (window as unknown as {
+      __NEXT_DATA__?: { props?: { pageProps?: { currentPathname?: string } } };
+    }).__NEXT_DATA__?.props?.pageProps?.currentPathname;
+    if (typeof cur === 'string' && cur.startsWith('/')) {
+      const curSeg = cur.replace(/^\//, '').split('/')[0] || '';
+      if (!looksLikePageId(curSeg)) {
+        return { path: cur, resolved: false };
+      }
+    }
+  } catch { /* noop */ }
 
   return { path: rawPath, resolved: false };
 };
