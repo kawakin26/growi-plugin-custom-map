@@ -114,6 +114,10 @@ export const registerAsset = async (params: {
   if (!base) throw new Error('cadConvertApi is not configured');
   const res = await fetch(base, {
     method: 'POST',
+    // GROWI のログイン Cookie を付けて送る(WRITE_AUTH_MODE='group'/'authenticated' の判定に使う)。
+    // 'include' にするとクロスオリジン配置(別ホスト)でも Cookie を送れる(API 側の
+    // CORS_ORIGINS で具体的な origin を許可していれば動作する)。
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(params),
   });
@@ -133,7 +137,11 @@ export const deleteCadAsset = async (name: string): Promise<void> => {
   const base = getAssetsApiBase();
   if (!base) throw new Error('cadConvertApi is not configured');
   const url = `${base}?name=${encodeURIComponent(name)}`;
-  const res = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } });
+  const res = await fetch(url, {
+    method: 'DELETE',
+    credentials: 'include', // GROWI のログイン Cookie を付けて送る(registerAsset と同様)。
+    headers: { Accept: 'application/json' },
+  });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     const msg = (data && (data as Record<string, unknown>).message) || `delete failed: ${res.status}`;
